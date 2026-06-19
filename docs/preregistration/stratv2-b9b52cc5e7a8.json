@@ -1,0 +1,262 @@
+{
+  "cache_manifest_sha256": {
+    "bybit_real_btc_v1": "de90a806b57db9258978906e7059eed12e804b782e1b947eaaae264ef4881581",
+    "bybit_real_eth_v1": "7658e5183a106c6da1448978844904af515634cc98ad359379a92c9c0aa1cf7b"
+  },
+  "cache_root": "data/cache/bybit",
+  "content_hash": "b9b52cc5e7a899fcd722a7eefc7c7528dc20bbaa953ba9896ad93d19cd4046de",
+  "plan": {
+    "a1_bar": {
+      "capital_robustness_equities": [
+        500.0,
+        2000.0
+      ],
+      "cost_mode": "taker_roundtrip_plus_slippage",
+      "decision_horizons": [
+        21,
+        42
+      ],
+      "maker_can_authorize": false,
+      "max_single_cluster_share": 0.35,
+      "max_top3_cluster_share": 0.65,
+      "min_clusters": 6,
+      "min_insample_funding_rows": 900,
+      "min_qualifying_pct": 0.1,
+      "min_qualifying_windows": 80,
+      "min_valid_windows_per_horizon": 800,
+      "per_symbol": true,
+      "primary_equity_usd": 1000.0,
+      "safety_margin_bps": 1.0
+    },
+    "a2_bar": {
+      "depth_per_leg_usd": [
+        250.0,
+        500.0
+      ],
+      "equity_usd": 1000.0,
+      "max_single_week_share": 0.4,
+      "max_slippage_bps_per_leg": 5.0,
+      "min_clusters": 6,
+      "min_days_funding_history": 90,
+      "min_qualifying_24h_pct": 0.1,
+      "min_qualifying_24h_windows": 30,
+      "requires": [
+        "funding_history",
+        "cadence",
+        "fees",
+        "depth_liquidity",
+        "adl_liquidation_metadata",
+        "borrow_basis_risk",
+        "cex_comparison"
+      ],
+      "roadmap_apr_claims_authorize": false,
+      "safety_margin_bps": 1.0
+    },
+    "aggregate_rules": {
+      "any_fold_collapse_is_no_go": true,
+      "any_inconclusive_fold_blocks_go": true,
+      "max_mdd": 0.05,
+      "max_single_cluster_pnl_share": 0.35,
+      "max_single_fold_pnl_share": 0.5,
+      "max_top3_cluster_pnl_share": 0.65,
+      "min_folds_nonneg_net_apr_pct": 0.75,
+      "min_folds_with_entries": 3,
+      "min_net_apr": 0.0,
+      "min_sharpe": 1.5,
+      "min_total_entries": 10,
+      "source_quality_required": "venue"
+    },
+    "cost_modes": {
+      "primary": "taker_roundtrip_plus_slippage",
+      "secondary": "conservative_maker_sensitivity_non_authorizing"
+    },
+    "decision_horizons": [
+      21,
+      42
+    ],
+    "equity_grid": [
+      500.0,
+      1000.0,
+      2000.0
+    ],
+    "folds": [
+      {
+        "id": "F1",
+        "test_end": "2025-05-01T00:00:00Z",
+        "test_start": "2025-03-01T00:00:00Z",
+        "train_end": "2025-03-01T00:00:00Z",
+        "train_start": "2024-09-01T00:00:00Z"
+      },
+      {
+        "id": "F2",
+        "test_end": "2025-07-01T00:00:00Z",
+        "test_start": "2025-05-01T00:00:00Z",
+        "train_end": "2025-05-01T00:00:00Z",
+        "train_start": "2024-11-01T00:00:00Z"
+      },
+      {
+        "id": "F3",
+        "test_end": "2025-09-01T00:00:00Z",
+        "test_start": "2025-07-01T00:00:00Z",
+        "train_end": "2025-07-01T00:00:00Z",
+        "train_start": "2025-01-01T00:00:00Z"
+      },
+      {
+        "id": "F4",
+        "test_end": "2025-11-01T00:00:00Z",
+        "test_start": "2025-09-01T00:00:00Z",
+        "train_end": "2025-09-01T00:00:00Z",
+        "train_start": "2025-03-01T00:00:00Z"
+      },
+      {
+        "id": "F5",
+        "test_end": "2026-01-01T00:00:00Z",
+        "test_start": "2025-11-01T00:00:00Z",
+        "train_end": "2025-11-01T00:00:00Z",
+        "train_start": "2025-05-01T00:00:00Z"
+      },
+      {
+        "id": "F6",
+        "test_end": "2026-03-01T00:00:00Z",
+        "test_start": "2026-01-01T00:00:00Z",
+        "train_end": "2026-01-01T00:00:00Z",
+        "train_start": "2025-07-01T00:00:00Z"
+      },
+      {
+        "id": "F7",
+        "test_end": "2026-06-01T00:00:00Z",
+        "test_start": "2026-03-01T00:00:00Z",
+        "train_end": "2026-03-01T00:00:00Z",
+        "train_start": "2025-09-01T00:00:00Z"
+      }
+    ],
+    "grid": {
+      "candidates_per_fold_per_symbol": 16,
+      "leverage_policy": "risk_capped_dynamic",
+      "min_funding_rate_8h": [
+        0.0,
+        2.5e-05,
+        5e-05,
+        0.0001
+      ],
+      "min_hold_intervals": [
+        21,
+        42
+      ],
+      "rebalance_band": [
+        0.02,
+        0.05
+      ],
+      "search_space_version": "strategy-v2-a1-grid-v1",
+      "selection_cost_mode": "taker_roundtrip_plus_slippage",
+      "selection_equity_usd": 1000.0
+    },
+    "insample_until_ms": 1756684800000,
+    "primary_equity_usd": 1000.0,
+    "report_horizons": [
+      1,
+      3,
+      7,
+      14
+    ],
+    "scenarios": {
+      "BTC/USDT:USDT": "bybit_real_btc_v1",
+      "ETH/USDT:USDT": "bybit_real_eth_v1"
+    },
+    "schema_version": "stratv2-prereg-v1",
+    "source_quality_required": "venue",
+    "symbols": [
+      "BTC/USDT:USDT",
+      "ETH/USDT:USDT"
+    ],
+    "trial_budget": {
+      "grid_versions": 1,
+      "max_primary_heldout_evals": 14,
+      "max_primary_train_trials": 224,
+      "max_secondary_sensitivity_evals": 42,
+      "multiplicity_method": "hard_trial_budget_cap",
+      "no_fold_deletion": true,
+      "no_hidden_retries": true,
+      "total_heldout_cap": 56
+    }
+  },
+  "run_id": "stratv2-b9b52cc5e7a8",
+  "schema_version": "stratv2-prereg-v1",
+  "settings_snapshot": {
+    "adl_rank_threshold": 3,
+    "base_leverage": 2.0,
+    "capital_usd_max": 2000.0,
+    "capital_usd_min": 500.0,
+    "default_capital_usd": 1000.0,
+    "funding_compression_8h": 5e-05,
+    "funding_reversal_imminent_8h": 0.0,
+    "gap_stress_pct": 0.2,
+    "health_factor_floor": 1.5,
+    "leverage_cost_apr": 0.0,
+    "max_drawdown_pct": 0.05,
+    "max_leverage": 5.0,
+    "max_net_delta_frac": 0.02,
+    "max_position_pct": 0.25,
+    "min_funding_rate_8h": 0.0001,
+    "min_liq_distance_pct": 0.15,
+    "perp_maker_fee_bps": 2.0,
+    "perp_taker_fee_bps": 5.5,
+    "reserve_pct": 0.25,
+    "slippage_base_bps": 1.0,
+    "slippage_cap_bps": 50.0,
+    "slippage_impact_bps_per_pct_volume": 5.0,
+    "spot_taker_fee_bps": 10.0,
+    "verdict_max_mdd": 0.05,
+    "verdict_min_net_apr": 0.0,
+    "verdict_min_sharpe": 1.5,
+    "vol_spike_annual": 1.0
+  },
+  "source_hashes": {
+    "scripts/collect_pivot_venue_evidence.py": "9882babcd051cbc9c1db4ebcbbabdaa46ebe9a9f47f10cd6449ade55bd5eee37",
+    "scripts/create_stratv2_preregistration.py": "7087400c1d7f74a89db1f80c8316a432c4ddfb06384498dafdca69e24c6f62ed",
+    "scripts/gen_edge_demo_fixture.py": "2e5b711a1a24006610336f6a1c08f5f2486c4f60ecda2903247f21bedd157559",
+    "scripts/gen_stage1_structural_fixture.py": "5df8dee3ad8df2af1e4d9ae7030c05e28a8ffd121ea470e8883fc683eecab517",
+    "scripts/populate_bybit_cache.py": "db52649a4a9609975c5871e4a49cd94dd8093157e86d57d396281ac885203f69",
+    "scripts/run_backtest.py": "d6d90bda8b5b2b5045a73032056a794d62dadbc745f79e0fb2769c90195e868f",
+    "scripts/run_breakeven_analysis.py": "89d0392489db58601ddac6151309643b6040f68514c2007a9b574e6bede283d4",
+    "scripts/run_edge_verdict.py": "50435d0296ce59028ba737c6a795b0fbc8a6ae29779afb4dc0ef8df19ea9b085",
+    "scripts/run_final_verdict.py": "6cadcc9624b135411b836befbb86cb9ba89eb285ffce0272a7e905996ae47848",
+    "scripts/run_neutral_edge_screen.py": "42be19a303384946d30e7ae49c38d4e7588e6573c170700e59a12fa3e1acb62e",
+    "scripts/run_stage1_gate.py": "e73ce561475d050fd93813e093c2d1bd9272314123c98b5d863deb7f9a8560ff",
+    "scripts/verify_stratv2_preregistration.py": "663ae4d59e82ca133c8f6a16e65d375f1aec1271e69d4123ce5718893506c8b6",
+    "src/ajentix_quant/__init__.py": "abd937f84a840fe1d16dca7045e5fcaf8dbd226f54ea41c34b1139b17a8102e1",
+    "src/ajentix_quant/adapters/__init__.py": "4744bb749862eefbe0d980f8dd0040ade879238f13ad8a4949860306b62bbee9",
+    "src/ajentix_quant/adapters/base.py": "3c616335f18b5307fb87dd7d54bab81aabcd8024af3a459c20f12ccdd15c2668",
+    "src/ajentix_quant/adapters/bybit.py": "24b4119de7af125ab2e8181ee4d5e1a03a9b67f94337a023038d6957c510be58",
+    "src/ajentix_quant/backtest/__init__.py": "7dafef2395210269a2f861278c0f4c7a61e3355c5f49f325625934ff3bc2e268",
+    "src/ajentix_quant/backtest/account.py": "8a82d091a70b75a03a7885f6d7002c4c0912d8d970e919f5d57f3bd20e81e934",
+    "src/ajentix_quant/backtest/breakeven.py": "9f85fd4f31e0ac5ae4f9c4a4ae3b478db232c339f36e0da7d23b1177ce579b48",
+    "src/ajentix_quant/backtest/costs.py": "de78a59bbf30bc671c4b6648751cf4ded3f94fc2199acd628f99e2bf43d6a9cd",
+    "src/ajentix_quant/backtest/engine.py": "cb6db871de73300b2554fa689bb03aabc01206996e1e40fba25faa82b9aa732f",
+    "src/ajentix_quant/backtest/events.py": "07ad10f07a1aaeb886efd022d6d74628cef1f89d150eefdaa68b3c03cd1d4797",
+    "src/ajentix_quant/backtest/metrics.py": "aa84033f3570931dba12b0775a5b976a011c06914fa2bed84e6c0d0183e6f0a4",
+    "src/ajentix_quant/backtest/slippage.py": "a300e49940fec93083abd5abcc16cadfce9638dd6175cb7b68f7e44834ef2dbb",
+    "src/ajentix_quant/backtest/verdict.py": "85ef98d24ef824a851991c64d80ae17ca6c4b27316e74ab4c1951a3a6ff26af9",
+    "src/ajentix_quant/config.py": "65bb39ce8a2ee1dd3eaf2a1149c2c65ebc02aa8304fc7b388ae6b4cbcd370e94",
+    "src/ajentix_quant/data/__init__.py": "b950f7b0a102ee577f99418df53b35ea9c3710f8e8ed62de967cf4e41bb2ea63",
+    "src/ajentix_quant/data/cache.py": "219800f615d7cd0e04801cdc542130a9518e715ddb17fead40ae106ab10c60aa",
+    "src/ajentix_quant/data/replay.py": "e6ad6090e83669dcf85a9c404747d7f74b78b2920beee6fa5e72d20d8640e27e",
+    "src/ajentix_quant/data/sample.py": "bccbdd748fa94dc3792d6667cbd0a5a6b5f2350e83ed28e7ceeb911b1c53cfed",
+    "src/ajentix_quant/execution/__init__.py": "0ac76b97b4f2418a194df5dc4fa39ddd8374687b64bee29924345990901a456f",
+    "src/ajentix_quant/execution/paper.py": "d04b2134fe0e6f24bceaf8d6877e358afd3068c7d072f34a0172c9b96a6b99b3",
+    "src/ajentix_quant/research/__init__.py": "5d1568be758cbf7896ad326f34f9f3ac218eb820022b7633900542394233328a",
+    "src/ajentix_quant/research/final_verdict.py": "9b580811cbeed3c38077218b9b6d3cef66320269dee3ab17519dc84e94af7e80",
+    "src/ajentix_quant/research/neutral_screen.py": "73ad5473b81ec3c1e320372ce7a943d312d3b0da89131dbd1860a10e979467b9",
+    "src/ajentix_quant/research/preregistration.py": "696ea3346df7d6a0e2db2140788040f8886d8dec08dd02e3f47b80be7ae6fa09",
+    "src/ajentix_quant/research/venue_evidence.py": "0f20c6b692747d533fb78b00cc1c8cc79741b9788e9b0463f60b95d46946f28a",
+    "src/ajentix_quant/risk/__init__.py": "c9f70173af701898fcdb9b00f54506caae12bf7374f195d756e1f406e19003bc",
+    "src/ajentix_quant/risk/engine.py": "8213c49124241bdaadca82c2a6324edd7abbedb124a432c94751dfaf5dd55055",
+    "src/ajentix_quant/risk/margin.py": "e3998d660545606f52802f8433caa160af80cc8aaa81354562878bc022802120",
+    "src/ajentix_quant/scripts_entry.py": "1902d8a705d44c824d8bf9bbf855245be38eeca53fb57c27a7934d68a4691ed1",
+    "src/ajentix_quant/strategies/__init__.py": "e261b32fc964507e1c762567988fcb2b56c7ec8d64ed23e5b8aaa2ad7e809ce8",
+    "src/ajentix_quant/strategies/base.py": "98ff01484e945c94988a5d992f19ef778ae9caf52b9b8e67849641cda4151557",
+    "src/ajentix_quant/strategies/funding_harvest.py": "ffe9f919d498e6ec48b15c2b434140cfcdab1656cbfcb11b86a00d9d4bfa4a91",
+    "src/ajentix_quant/strategies/sizing.py": "6f5eaa8789a4841691d08f4f7027247ef2813d20c4f638e5264c1f210d38503a",
+    "src/ajentix_quant/strategies/state.py": "8a7320300b0e6211d49e5cd1499421e129d0cfd3a3662f40af5c25e53d7dc85a"
+  }
+}
