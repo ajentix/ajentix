@@ -1,0 +1,26 @@
+{
+  "generator_version": "ajentix-quant/phase1-g002",
+  "param_freeze_hash": "stage1-structural-v1",
+  "row_counts": {
+    "funding.csv": 42,
+    "ohlcv.csv": 126
+  },
+  "scenario_id": "structural_v1",
+  "schema_version": "aq-cache-v1",
+  "sha256_by_file": {
+    "funding.csv": "b9765490e244c4e39f97f50cbfe42c2b7be208ed68cb9e0ad3c7794ced0f729a",
+    "ohlcv.csv": "2a7c35a23065ff4e483b5bd1948da19b2a719ae906f775d29d591fcf311ee07a"
+  },
+  "source_quality": {
+    "funding_history": "fixture",
+    "perp_mark_ohlcv": "fixture",
+    "perp_trade_ohlcv": "fixture",
+    "spot_trade_ohlcv": "fixture"
+  },
+  "symbols": [
+    "BTC/USDT:USDT"
+  ],
+  "timeframe": "8h",
+  "train_until_ms": null,
+  "venue": "bybit"
+}

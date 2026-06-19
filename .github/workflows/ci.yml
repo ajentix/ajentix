@@ -24,5 +24,20 @@ jobs:
         run: mypy || true
       - name: Tests
         run: pytest -q
+      - name: Stage-1 structural gate
+        run: python scripts/run_stage1_gate.py
+      - name: Edge Verdict report (non-gating)
+        run: |
+          python scripts/run_edge_verdict.py --scenario-id edge_demo_v1 --cache-root tests/fixtures/edge --out /tmp/edge
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path('/tmp/edge.json').read_text(encoding='utf-8'))
+          assert payload['schema_version'] == 'aq-cache-v1'
+          assert payload['verdict'] == 'inconclusive'
+          assert any('real venue data required' in reason for reason in payload['reasons'])
+          assert Path('/tmp/edge.md').is_file()
+          PY
       - name: Smoke — sample backtest runs
         run: python scripts/run_backtest.py

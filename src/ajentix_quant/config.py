@@ -26,10 +26,39 @@ class Settings(BaseSettings):
     max_drawdown_pct: float = 0.05
     funding_reversal_exit_hours: int = 24
     max_position_pct: float = 0.25
+    health_factor_floor: float = 1.5
+    vol_spike_annual: float = 1.0
+    funding_compression_8h: float = 0.00005
+    funding_reversal_imminent_8h: float = 0.0
+    max_net_delta_frac: float = 0.02
+    gap_stress_pct: float = 0.20
+    adl_rank_threshold: int = 3
 
     # --- strategy ---
-    symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT:USDT"])
+    symbols: list[str] = Field(
+        default_factory=lambda: ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+    )
     min_funding_rate_8h: float = 0.0001  # 0.01%/8h entry threshold
+
+    # --- data / cache (Phase 1) ---
+    cache_dir: str = "data/cache"
+    timeframe: str = "1h"
+    gate_scenario_id: str = "stage1_hybrid_v1"
+    edge_verdict_scenario_id: str = "bybit_real_v1"
+
+    # --- costs (deterministic; bps unless noted) ---
+    perp_taker_fee_bps: float = 5.5  # Bybit non-VIP linear taker ~0.055%
+    perp_maker_fee_bps: float = 2.0  # ~0.02%
+    spot_taker_fee_bps: float = 10.0  # ~0.10%
+    leverage_cost_apr: float = 0.0  # deterministic borrow/financing drag (per scenario)
+
+    # --- slippage (size-based, deterministic) ---
+    slippage_base_bps: float = 1.0
+    slippage_impact_bps_per_pct_volume: float = 5.0
+    slippage_cap_bps: float = 50.0
+
+    # --- small-capital sizing ---
+    default_capital_usd: float = 1000.0  # within [capital_usd_min, capital_usd_max]
 
 
 settings = Settings()
