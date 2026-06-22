@@ -1,0 +1,156 @@
+{
+  "bid_ask_availability_stats": {
+    "bid_ask_complete": true,
+    "rows_with_ask": 10,
+    "rows_with_bid": 10,
+    "rows_with_mark_price": 10,
+    "total_rows": 10
+  },
+  "coverage_timestamps_ms": {
+    "ETH": [
+      1717200000000,
+      1717203600000
+    ]
+  },
+  "date_range": {
+    "end_ts_ms": 1717203600000,
+    "start_ts_ms": 1717200000000
+  },
+  "exchange": "deribit",
+  "expiry_lifecycle": [
+    {
+      "expiry_ms": 1719532800000,
+      "first_snapshot_ts_ms": 1717200000000,
+      "instrument_count": 3,
+      "instrument_names": [
+        "ETH-28JUN24-3000-P",
+        "ETH-28JUN24-3200-P",
+        "ETH-28JUN24-3600-C"
+      ],
+      "last_snapshot_ts_ms": 1717203600000,
+      "leg_count": 6,
+      "snapshot_count": 2,
+      "snapshot_timestamps_ms": [
+        1717200000000,
+        1717203600000
+      ],
+      "underlying": "ETH"
+    },
+    {
+      "expiry_ms": 1721952000000,
+      "first_snapshot_ts_ms": 1717200000000,
+      "instrument_count": 2,
+      "instrument_names": [
+        "ETH-26JUL24-3000-P",
+        "ETH-26JUL24-3800-C"
+      ],
+      "last_snapshot_ts_ms": 1717203600000,
+      "leg_count": 4,
+      "snapshot_count": 2,
+      "snapshot_timestamps_ms": [
+        1717200000000,
+        1717203600000
+      ],
+      "underlying": "ETH"
+    }
+  ],
+  "file_sizes": {
+    "option_chains.csv": 4025
+  },
+  "fold_coverage_timestamps_ms": {
+    "fixture_fold": [
+      1717200000000,
+      1717203600000
+    ]
+  },
+  "manifest_kind": "normalized",
+  "min_ticket_metadata": {
+    "ETH": {
+      "instrument_count": 5,
+      "min_lot_max": 1.0,
+      "min_lot_min": 1.0,
+      "min_tick_max": 0.0005,
+      "min_tick_min": 0.0005
+    }
+  },
+  "non_authorizing_source_quality_keys": [
+    "instrument_metadata",
+    "option_chain",
+    "settlement_index",
+    "source_id:fixture-deribit-options"
+  ],
+  "raw_manifest_sha256": "a49a80fd85c368d308c787d5af88c95296cb17200da2c62960e3dabe7f93f222",
+  "required_column_coverage": {
+    "ask_amount": true,
+    "ask_iv": true,
+    "ask_price": true,
+    "bid_amount": true,
+    "bid_iv": true,
+    "bid_price": true,
+    "collateral_currency": true,
+    "contract_multiplier": true,
+    "exchange": true,
+    "expiry_ms": true,
+    "fee_currency": true,
+    "greek_provenance_key": true,
+    "index_price": true,
+    "instrument_name": true,
+    "mark_price": true,
+    "min_lot": true,
+    "min_tick": true,
+    "option_type": true,
+    "premium_currency": true,
+    "quote_age_s": true,
+    "quote_ts_ms": true,
+    "scenario_id": true,
+    "settlement_index": true,
+    "settlement_index_price": true,
+    "settlement_style": true,
+    "side": true,
+    "snapshot_ts_ms": true,
+    "source_id": true,
+    "source_quality": true,
+    "source_ts_ms": true,
+    "strike": true,
+    "underlying": true,
+    "usd_conversion_inputs_json": true,
+    "usd_conversion_source": true
+  },
+  "row_counts": {
+    "legs": 10,
+    "option_chains.csv": 10,
+    "snapshots": 4
+  },
+  "scenario_id": "tiny_eth_options_v1",
+  "schema_version": "aq-options-cache-v1",
+  "settlement_index_coverage": {
+    "ETH": {
+      "rows_with_index_price": 10,
+      "rows_with_settlement_index_price": 10,
+      "timestamps_ms": [
+        1717200000000,
+        1717203600000
+      ],
+      "total_rows": 10
+    }
+  },
+  "sha256_by_file": {
+    "option_chains.csv": "393d0f6b37e67b4f7c0251c8e092e9b9ecbb6ca89888f1d216a70dd77334dcd6"
+  },
+  "source_ids": [
+    "fixture-deribit-options"
+  ],
+  "source_quality": {
+    "instrument_metadata": "fixture",
+    "option_chain": "fixture",
+    "settlement_index": "fixture",
+    "source_id:fixture-deribit-options": "fixture"
+  },
+  "stress_selector_input_coverage": {
+    "underlying_index_timestamps_ms": [
+      1717200000000,
+      1717203600000
+    ]
+  },
+  "transform_version": "ajentix-quant/phase1-g002-options-transform-v1"
+}

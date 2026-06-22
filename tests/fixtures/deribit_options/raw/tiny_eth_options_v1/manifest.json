@@ -1,0 +1,33 @@
+{
+  "acquisition_tool_version": "fixture-generator-v1",
+  "currency": "ETH",
+  "date_range": {
+    "end_ts_ms": 1717203600000,
+    "start_ts_ms": 1717200000000
+  },
+  "download_timestamp_ms": 1717200000000,
+  "file_sizes": {
+    "raw_options_chain.jsonl": 2099
+  },
+  "license_budget_note": "Tiny deterministic fixture only; non-authorizing and not real paid data.",
+  "manifest_kind": "raw_source",
+  "row_counts": {
+    "raw_options_chain.jsonl": 10
+  },
+  "scenario_id": "tiny_eth_options_v1",
+  "schema_version": "aq-options-cache-v1",
+  "sha256_by_file": {
+    "raw_options_chain.jsonl": "d6e4009e2340f38d78c13addd1929924b9c1af3d8d68e03b909b1b08bae92f3a"
+  },
+  "source_ids": [
+    "fixture-deribit-options"
+  ],
+  "source_quality": {
+    "instrument_metadata": "fixture",
+    "option_chain": "fixture",
+    "settlement_index": "fixture"
+  },
+  "source_uri_ids": [
+    "fixture://deribit/options/eth/tiny-v1"
+  ]
+}

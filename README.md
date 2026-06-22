@@ -17,6 +17,13 @@ The crown-jewel quant edge in crypto is **market-neutral, not directional**. Cas
 
 This repo is a **walking skeleton**: the core path runs end-to-end on bundled sample data, but strategies/backtest are intentionally minimal. Live trading is **not** implemented.
 
+### Edge R&D status (read this before trusting any strategy)
+
+Two strategies have been put through the project's anti-overfit, pre-registered validation harness:
+
+- **Delta-neutral funding harvest (v1):** `NO_GO` out-of-sample. Real Bybit funding (~0.003–0.01%/8h) is dwarfed by ~0.165% round-trip cost at $1k; BTC+ETH fail the in-sample bar, no held-out authorization (`reports/strategy_v2_final_verdict.md`).
+- **VRP / defined-risk short-vol (ETH Deribit credit spreads):** the only survivor of 19 OOS edge tests (`docs/research/edge_research_findings.md`). The full deterministic engine is built and gated (pre-registration governance, single option-cost path, defined-risk-only, walk-forward verdict, objective stress, ungameable GO), but the **feasibility verdict is `INCONCLUSIVE_DATA_BLOCKER`**: it requires real historical Deribit ETH option-chain data (bid/ask/expiry/settlement over ~2024-08→2026-06, e.g. Tardis) which is not yet wired in. The engine fails closed and never fabricates data; it runs to a real GO/NO_GO/INCONCLUSIVE the moment a real cache is populated (`reports/vrp_final_verdict.md`). **No capital is authorized; ADR-0002 is not promoted.**
+
 ```
 src/ajentix_quant/
   config.py               # pydantic-settings (AQ_* env)
