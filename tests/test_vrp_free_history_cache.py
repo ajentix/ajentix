@@ -31,6 +31,41 @@ START_MS = 1725148800000
 MID_MS = 1725177600000
 END_MS = 1725206400000
 STRESS_WINDOWS = [{"id": "fixture_stress", "start_ts_ms": START_MS, "end_ts_ms": MID_MS}]
+_ALLOWED_GRID_TIMESTAMP_KEYS = {
+    ("coverage", "snapshot_grid_8h", "required_timestamps_ms"),
+    ("coverage", "snapshot_grid_8h", "covered_timestamps_ms"),
+    ("coverage", "snapshot_grid_8h", "missing_timestamps_ms"),
+}
+_FORBIDDEN_PER_TRADE_TIMESTAMP_KEYS = {
+    "timestamps_ms",
+    "train_timestamps_ms",
+    "test_timestamps_ms",
+    "supporting_trade_timestamps_ms_by_grid",
+}
+
+
+def _assert_no_per_trade_timestamp_lists(manifest: dict) -> None:
+    offenders: list[str] = []
+
+    def walk(value: object, path: tuple[str, ...]) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = (*path, str(key))
+                if key in _FORBIDDEN_PER_TRADE_TIMESTAMP_KEYS:
+                    offenders.append(".".join(child_path))
+                elif (
+                    str(key).endswith("_timestamps_ms")
+                    and child_path not in _ALLOWED_GRID_TIMESTAMP_KEYS
+                ):
+                    offenders.append(".".join(child_path))
+                walk(child, child_path)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, (*path, f"[{index}]"))
+
+    walk(manifest["coverage"], ("coverage",))
+    walk(manifest["underlying_index_path"], ("underlying_index_path",))
+    assert offenders == []
 
 
 def _fixture_rows() -> list[dict]:
@@ -263,7 +298,7 @@ def test_coverage_manifest_math_for_expiry_strike_type_dte_moneyness_fold_grid_a
     manifest = load_vrp_free_history_manifest(tmp_path, DEFAULT_SCENARIO_ID)
     coverage = manifest["coverage"]
 
-    assert manifest["schema_version"] == "aq-vrp-free-history-cache-v1"
+    assert manifest["schema_version"] == "aq-vrp-free-history-cache-v2"
     assert manifest["row_counts"] == {
         TRADES_FILE: 6,
         INDEX_PATH_FILE: 3,
@@ -279,13 +314,23 @@ def test_coverage_manifest_math_for_expiry_strike_type_dte_moneyness_fold_grid_a
     assert coverage["by_dte_bucket"]["dte_45"]["trade_count"] == 3
     assert coverage["by_moneyness_bucket"]["near"]["trade_count"] == 3
     assert coverage["by_moneyness_bucket"]["wing"]["trade_count"] == 3
-    assert coverage["by_fold"]["F1"]["train_count"] == 6
-    assert coverage["by_fold"]["F1"]["test_count"] == 0
-    assert coverage["snapshot_grid_8h"]["required_timestamps_ms"] == [START_MS, MID_MS, END_MS]
-    assert coverage["snapshot_grid_8h"]["covered_timestamps_ms"] == [START_MS, MID_MS, END_MS]
-    assert coverage["snapshot_grid_8h"]["missing_timestamps_ms"] == []
-    assert coverage["stress_windows"]["covered_window_ids"] == ["fixture_stress"]
-    assert coverage["stress_windows"]["missing_window_ids"] == []
+    assert sum(row["trade_count"] for row in coverage["trade_lattice"]) == 6
+    assert coverage["by_fold"]["F1"] == {"train_count": 6, "test_count": 0}
+    grid = coverage["snapshot_grid_8h"]
+    assert grid["required_count"] == 3
+    assert grid["covered_count"] == 3
+    assert grid["missing_count"] == 0
+    assert grid["required_timestamps_ms"] == [START_MS, MID_MS, END_MS]
+    assert grid["covered_timestamps_ms"] == [START_MS, MID_MS, END_MS]
+    assert grid["missing_timestamps_ms"] == []
+    assert "supporting_trade_timestamps_ms_by_grid" not in grid
+    stress = coverage["stress_windows"]
+    assert stress["window_count"] == 1
+    assert stress["covered_count"] == 1
+    assert stress["missing_count"] == 0
+    assert stress["covered_window_ids"] == ["fixture_stress"]
+    assert stress["missing_window_ids"] == []
+    _assert_no_per_trade_timestamp_lists(manifest)
     assert (scenario_dir / "manifest.json").is_file()
 
 
@@ -379,7 +424,9 @@ def test_exact_underlying_index_path_manifest_and_conflict_detection(tmp_path):
         == "lower_median_real_observed_reading"
     )
     assert index_manifest["same_ms_max_rel_spread_threshold"] == pytest.approx(0.05)
-    assert index_manifest["timestamps_ms"] == [START_MS, MID_MS, END_MS]
+    assert index_manifest["row_count"] == 3
+    assert index_manifest["date_range"] == {"start_ts_ms": START_MS, "end_ts_ms": END_MS}
+    assert "timestamps_ms" not in index_manifest
 
     rows = _fixture_rows()
     conflict = dict(rows[1])

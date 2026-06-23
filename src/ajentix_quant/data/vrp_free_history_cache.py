@@ -1,6 +1,6 @@
 """Deterministic raw cache for free Deribit-history VRP option trades.
 
-``aq-vrp-free-history-cache-v1`` stores only observed public Deribit-history trade
+``aq-vrp-free-history-cache-v2`` stores only observed public Deribit-history trade
 rows plus the exact ETH index path carried in those rows. The module validates
 strictly and fails closed on malformed instruments, missing IV/index/amount,
 non-finite values, stale time gaps, or missing requested grid/stress coverage. It
@@ -28,9 +28,9 @@ from ajentix_quant.research.vrp_free_preregistration import (
     PLAN_RECONSTRUCTION_CONFIG,
 )
 
-SCHEMA_VERSION = "aq-vrp-free-history-cache-v1"
+SCHEMA_VERSION = "aq-vrp-free-history-cache-v2"
 RAW_MANIFEST_KIND = "raw_source"
-GENERATOR_VERSION = "ajentix-quant/g002-vrp-free-history-cache-v1"
+GENERATOR_VERSION = "ajentix-quant/g002-vrp-free-history-cache-v2"
 DEFAULT_MAX_NON_IV_BEARING_RATE = 0.10
 
 TRADES_FILE = "trades.jsonl"
@@ -533,13 +533,7 @@ def _coverage_counts(
     grouped: dict[str, list[ParsedDeribitOptionTrade]] = {}
     for trade in trades:
         grouped.setdefault(str(key_fn(trade)), []).append(trade)
-    return {
-        key: {
-            "trade_count": len(values),
-            "timestamps_ms": sorted({trade.timestamp_ms for trade in values}),
-        }
-        for key, values in sorted(grouped.items())
-    }
+    return {key: {"trade_count": len(values)} for key, values in sorted(grouped.items())}
 
 
 def _dte_bucket(trade: ParsedDeribitOptionTrade) -> str:
@@ -566,17 +560,9 @@ def _fold_coverage(trades: Sequence[ParsedDeribitOptionTrade]) -> dict[str, dict
         train_end = _parse_iso_ms(str(fold["train_end"]))
         test_start = _parse_iso_ms(str(fold["test_start"]))
         test_end = _parse_iso_ms(str(fold["test_end"]))
-        train_ts = sorted(
-            {t.timestamp_ms for t in trades if train_start <= t.timestamp_ms < train_end}
-        )
-        test_ts = sorted(
-            {t.timestamp_ms for t in trades if test_start <= t.timestamp_ms < test_end}
-        )
         out[fold_id] = {
             "train_count": sum(1 for t in trades if train_start <= t.timestamp_ms < train_end),
             "test_count": sum(1 for t in trades if test_start <= t.timestamp_ms < test_end),
-            "train_timestamps_ms": train_ts,
-            "test_timestamps_ms": test_ts,
         }
     return out
 
@@ -604,7 +590,6 @@ def _trade_lattice(trades: Sequence[ParsedDeribitOptionTrade]) -> list[dict[str,
                 "dte_bucket": dte_bucket,
                 "moneyness_bucket": moneyness_bucket,
                 "trade_count": len(values),
-                "timestamps_ms": sorted({trade.timestamp_ms for trade in values}),
             }
         )
     return rows
@@ -621,7 +606,6 @@ def _snapshot_grid_coverage(
     required = _required_grid_timestamps(trades, coverage_start_ts_ms, end_ts_ms)
     covered: list[int] = []
     missing: list[int] = []
-    support_by_grid: dict[str, int] = {}
     point_index = 0
     latest: IndexPathPoint | None = None
     for grid_ts in required:
@@ -630,17 +614,18 @@ def _snapshot_grid_coverage(
             point_index += 1
         if latest is not None and grid_ts - latest.timestamp_ms <= max_time_gap_ms:
             covered.append(grid_ts)
-            support_by_grid[str(grid_ts)] = latest.timestamp_ms
         else:
             missing.append(grid_ts)
     return {
         "cadence_hours": PLAN_RECONSTRUCTION_CONFIG["cadence_hours"],
         "utc_hours": list(_GRID_HOURS),
         "max_trade_staleness_hours": PLAN_RECONSTRUCTION_CONFIG["max_trade_staleness_hours"],
+        "required_count": len(required),
+        "covered_count": len(covered),
+        "missing_count": len(missing),
         "required_timestamps_ms": required,
         "covered_timestamps_ms": covered,
         "missing_timestamps_ms": missing,
-        "supporting_trade_timestamps_ms_by_grid": support_by_grid,
         "status": "pass" if not missing else "fail",
     }
 
@@ -684,6 +669,9 @@ def _stress_window_coverage(
         (covered if has_point else missing).append(str(window["id"]))
     return {
         "status": "not_requested" if not windows else ("pass" if not missing else "fail"),
+        "window_count": len(windows),
+        "covered_count": len(covered),
+        "missing_count": len(missing),
         "windows": windows,
         "covered_window_ids": covered,
         "missing_window_ids": missing,
@@ -752,7 +740,6 @@ def _index_path_manifest(points: Sequence[IndexPathPoint], text: str) -> dict[st
             "start_ts_ms": points[0].timestamp_ms,
             "end_ts_ms": points[-1].timestamp_ms,
         },
-        "timestamps_ms": [point.timestamp_ms for point in points],
         "sha256": sha256_text(text),
     }
 
