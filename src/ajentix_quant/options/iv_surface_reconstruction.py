@@ -290,9 +290,18 @@ def reconstruct_from_history_dataset(
     if snapshot_timestamps_ms is None:
         date_range = _require_mapping(dataset.manifest.get("date_range"), "date_range missing")
         manifest_stress = _stress_timestamps_from_manifest(dataset.manifest)
+        start_ts_ms = _require_int(date_range.get("start_ts_ms"), "date_range.start_ts_ms")
+        # The reconstruction grid is required only over the coverage window; earlier
+        # trades are warmup that supply trailing IV/index for the opening grid points.
+        coverage_start_raw = date_range.get("coverage_start_ts_ms")
+        grid_start_ts_ms = (
+            _require_int(coverage_start_raw, "date_range.coverage_start_ts_ms")
+            if coverage_start_raw is not None
+            else start_ts_ms
+        )
         timestamps = required_reconstruction_timestamps(
             dataset.trades,
-            start_ts_ms=_require_int(date_range.get("start_ts_ms"), "date_range.start_ts_ms"),
+            start_ts_ms=grid_start_ts_ms,
             end_ts_ms=_require_int(date_range.get("end_ts_ms"), "date_range.end_ts_ms"),
             stress_timestamps_ms=tuple(stress_timestamps_ms) + manifest_stress,
         )
