@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import bisect
 import importlib.util
 import json
+import math
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,6 +18,7 @@ from ajentix_quant.data.deribit_history_effective_spread_calibration import (
     RESOLVED_EFFECTIVE_SPREAD_REASON,
     SELECTION_BIAS_CAVEAT,
     DeribitHistoryEffectiveSpreadCalibrationError,
+    _index_metrics_by_timestamp,
     effective_spread_leg_samples,
     effective_spread_structure_samples,
     load_effective_spread_calibration_manifest,
@@ -175,6 +179,97 @@ def _index_for_rows(
     max_ts = max(int(row["timestamp"]) for row in rows)
     return _daily_index_path(min_ts, max_ts, index_price=index_price)
 
+def _brute_force_index_metric(
+    timestamp_ms: int, index_path: tuple[IndexPathPoint, ...]
+) -> dict[str, float]:
+    ordered = tuple(sorted(index_path, key=lambda point: int(point.timestamp_ms)))
+    timestamps = [int(point.timestamp_ms) for point in ordered]
+    by_ts = {int(point.timestamp_ms): point for point in ordered}
+    current = by_ts[int(timestamp_ms)]
+    current_price = float(current.index_price)
+
+    rv_start = int(timestamp_ms) - 30 * DAY_MS
+    left = bisect.bisect_left(timestamps, rv_start)
+    right = bisect.bisect_right(timestamps, int(timestamp_ms))
+    window = tuple(ordered[left:right])
+    assert len(window) >= 2
+    assert int(window[-1].timestamp_ms) == int(timestamp_ms)
+    coverage_ms = int(window[-1].timestamp_ms) - int(window[0].timestamp_ms)
+    assert coverage_ms >= int(30 * DAY_MS * 0.90)
+
+    sum_sq_log_returns = 0.0
+    for previous, point in zip(window, window[1:], strict=False):
+        gap = int(point.timestamp_ms) - int(previous.timestamp_ms)
+        assert 0 < gap <= 72 * 60 * 60 * 1_000
+        sum_sq_log_returns += (
+            math.log(float(point.index_price) / float(previous.index_price)) ** 2
+        )
+    elapsed_years = coverage_ms / (365.0 * DAY_MS)
+    trailing_30d_rv_annualized = math.sqrt(sum_sq_log_returns / elapsed_years)
+
+    return_start = int(timestamp_ms) - 24 * 60 * 60 * 1_000
+    ref_index = bisect.bisect_right(timestamps, return_start) - 1
+    assert ref_index >= 0
+    ref = ordered[ref_index]
+    ref_age = return_start - int(ref.timestamp_ms)
+    assert 0 <= ref_age <= 72 * 60 * 60 * 1_000
+    abs_24h_return = abs(current_price / float(ref.index_price) - 1.0)
+    return {
+        "index_price": current_price,
+        "trailing_30d_rv_annualized": trailing_30d_rv_annualized,
+        "abs_24h_return": abs_24h_return,
+    }
+
+
+def test_index_metrics_match_brute_force_window_recompute_for_several_timestamps() -> None:
+    start_ms = _dt_ms(2024, 1, 1)
+    index_path = tuple(
+        IndexPathPoint(
+            timestamp_ms=start_ms + day * DAY_MS,
+            underlying="ETH",
+            index_price=2000.0 + 3.0 * day + 0.75 * (day % 5),
+        )
+        for day in range(36)
+    )
+    targets = [start_ms + day * DAY_MS for day in (27, 28, 30, 35)]
+
+    optimized = _index_metrics_by_timestamp(index_path, targets)
+
+    for timestamp_ms in targets:
+        brute = _brute_force_index_metric(timestamp_ms, index_path)
+        metric = optimized[timestamp_ms]
+        assert metric.index_price == brute["index_price"]
+        assert metric.trailing_30d_rv_annualized == pytest.approx(
+            brute["trailing_30d_rv_annualized"], rel=1e-15, abs=1e-15
+        )
+        assert metric.abs_24h_return == pytest.approx(
+            brute["abs_24h_return"], rel=0.0, abs=0.0
+        )
+
+
+def test_index_metrics_large_synthetic_path_perf_sanity() -> None:
+    start_ms = _dt_ms(2024, 1, 1)
+    step_ms = 60_000
+    point_count = 60_000
+    index_path = tuple(
+        IndexPathPoint(
+            timestamp_ms=start_ms + i * step_ms,
+            underlying="ETH",
+            index_price=2000.0 + 0.01 * i + 0.25 * (i % 17),
+        )
+        for i in range(point_count)
+    )
+    targets = [point.timestamp_ms for point in index_path[-3_000:]]
+
+    started = time.perf_counter()
+    metrics = _index_metrics_by_timestamp(index_path, targets)
+    elapsed = time.perf_counter() - started
+
+    assert len(metrics) == len(targets)
+    assert all(
+        math.isfinite(metric.trailing_30d_rv_annualized) for metric in metrics.values()
+    )
+    assert elapsed < 5.0
 
 def _load_cli() -> Any:
     spec = importlib.util.spec_from_file_location(

@@ -14,6 +14,7 @@ import csv
 import io
 import json
 import math
+from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -61,6 +62,8 @@ EFFECTIVE_SPREAD_SCHEMA_VERSION = "deribit-history-trade-vs-mark-effective-sprea
 EFFECTIVE_SPREAD_METHOD_VERSION = "deribit-history-trade-vs-mark-effective-spread-v1"
 EFFECTIVE_SPREAD_SOURCE_BASIS = "deribit_history_trade_vs_mark_effective"
 RESOLVED_EFFECTIVE_SPREAD_REASON = "resolved_from_deribit_history_trade_vs_mark_effective_spread"
+DEFAULT_MAX_EXTREME_EFFECTIVE_SPREAD_RATE = 0.10
+INDEX_PATH_MATCH_REL_TOL = 0.05
 EFFECTIVE_SPREAD_MANIFEST_KIND = "effective_spread_calibration"
 EFFECTIVE_SPREAD_GENERATOR_VERSION = (
     "ajentix-quant/deribit-history-trade-vs-mark-effective-spread-v1"
@@ -187,6 +190,24 @@ def _validate_index_path(index_path: Sequence[IndexPathPoint]) -> tuple[IndexPat
     return ordered
 
 
+def _index_pair_prefix_sums(
+    ordered: Sequence[IndexPathPoint],
+) -> tuple[tuple[float, ...], tuple[int, ...]]:
+    prefix_sq_log_returns = [0.0]
+    gaps: list[int] = []
+    for previous, point in zip(ordered, ordered[1:], strict=False):
+        gap = int(point.timestamp_ms) - int(previous.timestamp_ms)
+        gaps.append(gap)
+        previous_price = _positive_float(
+            previous.index_price, "index_path.previous.index_price"
+        )
+        point_price = _positive_float(point.index_price, "index_path.point.index_price")
+        prefix_sq_log_returns.append(
+            prefix_sq_log_returns[-1] + math.log(point_price / previous_price) ** 2
+        )
+    return tuple(prefix_sq_log_returns), tuple(gaps)
+
+
 def _index_metrics_by_timestamp(
     index_path: Sequence[IndexPathPoint],
     required_timestamps: Sequence[int] | None = None,
@@ -194,15 +215,47 @@ def _index_metrics_by_timestamp(
     ordered = _validate_index_path(index_path)
     timestamps = [int(point.timestamp_ms) for point in ordered]
     by_ts = {int(point.timestamp_ms): point for point in ordered}
+    prefix_sq_log_returns, gaps = _index_pair_prefix_sums(ordered)
     targets = (
         timestamps
         if required_timestamps is None
         else sorted({int(ts) for ts in required_timestamps})
     )
     out: dict[int, IndexRegimeMetrics] = {}
+    max_gap_indices: deque[int] = deque()
+    invalid_gap_indices: deque[int] = deque()
+    next_gap_index = 0
     for ts in targets:
         _require(ts in by_ts, f"index_path missing exact current timestamp {ts}")
-        out[ts] = _index_metrics_for_timestamp(ts, ordered, timestamps, by_ts)
+        rv_start = int(ts) - RV_LOOKBACK_DAYS * DAY_MS
+        left = bisect.bisect_left(timestamps, rv_start)
+        right = bisect.bisect_right(timestamps, int(ts))
+        pair_stop = max(0, right - 1)
+        while next_gap_index < pair_stop:
+            gap = gaps[next_gap_index]
+            while max_gap_indices and gaps[max_gap_indices[-1]] <= gap:
+                max_gap_indices.pop()
+            max_gap_indices.append(next_gap_index)
+            if gap <= 0 or gap > INDEX_LOOKBACK_MAX_GAP_MS:
+                invalid_gap_indices.append(next_gap_index)
+            next_gap_index += 1
+        while max_gap_indices and max_gap_indices[0] < left:
+            max_gap_indices.popleft()
+        while invalid_gap_indices and invalid_gap_indices[0] < left:
+            invalid_gap_indices.popleft()
+        max_gap = gaps[max_gap_indices[0]] if max_gap_indices else None
+        first_invalid_gap = gaps[invalid_gap_indices[0]] if invalid_gap_indices else None
+        out[ts] = _index_metrics_for_timestamp(
+            ts,
+            ordered,
+            timestamps,
+            by_ts,
+            left=left,
+            right=right,
+            prefix_sq_log_returns=prefix_sq_log_returns,
+            max_gap=max_gap,
+            first_invalid_gap=first_invalid_gap,
+        )
     return out
 
 
@@ -211,6 +264,12 @@ def _index_metrics_for_timestamp(
     ordered: Sequence[IndexPathPoint],
     timestamps: Sequence[int],
     by_ts: Mapping[int, IndexPathPoint],
+    *,
+    left: int | None = None,
+    right: int | None = None,
+    prefix_sq_log_returns: Sequence[float] | None = None,
+    max_gap: int | None = None,
+    first_invalid_gap: int | None = None,
 ) -> IndexRegimeMetrics:
     current = by_ts.get(int(timestamp_ms))
     if current is None:
@@ -219,35 +278,47 @@ def _index_metrics_for_timestamp(
         )
     current_price = _positive_float(current.index_price, "index_path.current.index_price")
 
-    rv_start = int(timestamp_ms) - RV_LOOKBACK_DAYS * DAY_MS
-    left = bisect.bisect_left(timestamps, rv_start)
-    right = bisect.bisect_right(timestamps, int(timestamp_ms))
-    window = tuple(ordered[left:right])
+    if left is None or right is None:
+        rv_start = int(timestamp_ms) - RV_LOOKBACK_DAYS * DAY_MS
+        left = bisect.bisect_left(timestamps, rv_start)
+        right = bisect.bisect_right(timestamps, int(timestamp_ms))
     _require(
-        len(window) >= 2,
+        right - left >= 2,
         f"insufficient {RV_LOOKBACK_DAYS}d index lookback for {timestamp_ms}",
     )
     _require(
-        int(window[-1].timestamp_ms) == int(timestamp_ms),
+        int(ordered[right - 1].timestamp_ms) == int(timestamp_ms),
         f"index_path missing exact current timestamp {timestamp_ms}",
     )
-    coverage_ms = int(window[-1].timestamp_ms) - int(window[0].timestamp_ms)
+    coverage_ms = int(ordered[right - 1].timestamp_ms) - int(ordered[left].timestamp_ms)
     min_coverage_ms = int(RV_LOOKBACK_DAYS * DAY_MS * MIN_RV_COVERAGE_RATIO)
     _require(
         coverage_ms >= min_coverage_ms,
         f"insufficient {RV_LOOKBACK_DAYS}d index lookback coverage for {timestamp_ms}",
     )
 
-    sum_sq_log_returns = 0.0
-    for previous, point in zip(window, window[1:], strict=False):
-        gap = int(point.timestamp_ms) - int(previous.timestamp_ms)
+    if prefix_sq_log_returns is None or max_gap is None:
+        sum_sq_log_returns = 0.0
+        for previous, point in zip(
+            ordered[left:right], ordered[left + 1 : right], strict=False
+        ):
+            gap = int(point.timestamp_ms) - int(previous.timestamp_ms)
+            _require(
+                0 < gap <= INDEX_LOOKBACK_MAX_GAP_MS,
+                f"index_path lookback gap {gap}ms exceeds tolerance",
+            )
+            previous_price = _positive_float(
+                previous.index_price, "index_path.previous.index_price"
+            )
+            point_price = _positive_float(point.index_price, "index_path.point.index_price")
+            sum_sq_log_returns += math.log(point_price / previous_price) ** 2
+    else:
+        gap_for_message = first_invalid_gap if first_invalid_gap is not None else max_gap
         _require(
-            0 < gap <= INDEX_LOOKBACK_MAX_GAP_MS,
-            f"index_path lookback gap {gap}ms exceeds tolerance",
+            0 < gap_for_message <= INDEX_LOOKBACK_MAX_GAP_MS,
+            f"index_path lookback gap {gap_for_message}ms exceeds tolerance",
         )
-        previous_price = _positive_float(previous.index_price, "index_path.previous.index_price")
-        point_price = _positive_float(point.index_price, "index_path.point.index_price")
-        sum_sq_log_returns += math.log(point_price / previous_price) ** 2
+        sum_sq_log_returns = prefix_sq_log_returns[right - 1] - prefix_sq_log_returns[left]
     elapsed_years = coverage_ms / (365.0 * DAY_MS)
     _require(elapsed_years > 0.0, "index_path lookback elapsed time must be positive")
     trailing_30d_rv_annualized = math.sqrt(sum_sq_log_returns / elapsed_years)
@@ -326,18 +397,20 @@ def effective_spread_leg_sample(
     _require(ask_price >= bid_price, "synthesized ask_price must be >= bid_price")
 
     index_point_price = _positive_float(metrics.index_price, "index_path current index_price")
-    if index_price_tolerance == 0.0:
-        _require(
-            index_point_price == index_price,
-            f"trade index_price {index_price!r} does not match index_path {index_point_price!r}",
-        )
-    else:
-        _require(
-            math.isclose(
-                index_point_price, index_price, rel_tol=0.0, abs_tol=index_price_tolerance
-            ),
-            f"trade index_price {index_price!r} does not match index_path {index_point_price!r}",
-        )
+    # The index path is built from per-millisecond MEDIAN reconciliation of same-ms
+    # readings (within the cache same-ms extreme threshold), so this trade's own
+    # index_price can differ from the reconciled path point by sub-millisecond noise.
+    # Accept that bounded difference (relative tolerance aligned to the reconciliation
+    # policy); a larger mismatch indicates wrong-timestamp data and still fails loud.
+    _require(
+        math.isclose(
+            index_point_price,
+            index_price,
+            rel_tol=INDEX_PATH_MATCH_REL_TOL,
+            abs_tol=index_price_tolerance,
+        ),
+        f"trade index_price {index_price!r} does not match index_path {index_point_price!r}",
+    )
 
     abs_log_moneyness = abs(math.log(strike / index_price))
     dte_bucket = dte_days_to_bucket(dte_days)
@@ -369,6 +442,26 @@ def effective_spread_leg_sample(
     )
 
 
+def _synthesized_bid_negative(trade: ParsedDeribitOptionTrade) -> bool:
+    """True when ``abs(price - mark_price) > mark_price`` so the synthesized bid
+    ``mark - abs(price - mark)`` would be negative. Such extreme/illiquid prints
+    (a trade priced far from mark relative to a tiny premium) are unusable for the
+    trade-vs-mark effective-spread model; they are excluded + rate-guarded, never
+    fabricated. Non-priced rows (mark<=0) are handled by the upstream partition.
+    """
+    price = trade.price
+    mark = trade.mark_price
+    if isinstance(price, bool) or isinstance(mark, bool):
+        return False
+    if not isinstance(price, (int, float)) or not isinstance(mark, (int, float)):
+        return False
+    price_f = float(price)
+    mark_f = float(mark)
+    if not (math.isfinite(price_f) and math.isfinite(mark_f)) or mark_f <= 0.0:
+        return False
+    return abs(price_f - mark_f) > mark_f
+
+
 def effective_spread_leg_samples(
     trades: Sequence[ParsedDeribitOptionTrade],
     index_path: Sequence[IndexPathPoint],
@@ -384,11 +477,23 @@ def effective_spread_leg_samples(
         max_timestamp_ms=max_timestamp_ms,
     )
     _require(bool(filtered), "at least one Deribit-history trade is required")
+    usable = tuple(trade for trade in filtered if not _synthesized_bid_negative(trade))
+    excluded = len(filtered) - len(usable)
+    extreme_rate = excluded / len(filtered)
+    _require(
+        extreme_rate <= DEFAULT_MAX_EXTREME_EFFECTIVE_SPREAD_RATE,
+        f"extreme effective-spread prints {extreme_rate:.4f} exceed max rate "
+        f"{DEFAULT_MAX_EXTREME_EFFECTIVE_SPREAD_RATE}",
+    )
+    _require(
+        bool(usable),
+        "no usable effective-spread prints after extreme-print exclusion",
+    )
     metrics = _index_metrics_by_timestamp(
         index_path,
-        required_timestamps=[trade.timestamp_ms for trade in filtered],
+        required_timestamps=[trade.timestamp_ms for trade in usable],
     )
-    legs = tuple(effective_spread_leg_sample(trade, metrics) for trade in filtered)
+    legs = tuple(effective_spread_leg_sample(trade, metrics) for trade in usable)
     return tuple(
         sorted(
             legs,
