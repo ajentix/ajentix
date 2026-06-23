@@ -1,5 +1,8 @@
 # Token-Unlock Supply-Shock Edge — Pre-Registration (DESIGN, v1)
 
+> **SUPERSEDED by v2** (`unlock-edge-prereg-v2-DESIGN.md`). This v1 was gated and returned
+> architect BLOCK + critic REQUEST-CHANGES; kept only for history. Do not crystallize v1.
+
 > Frozen design, pending gate (architect + critic). On approval -> immutable hashed module
 > src/ajentix_quant/research/unlock_preregistration.py + content-hashed artifact, like the VRP prereg.
 > Post-result edits to thresholds/grid/windows are INVALID (confirmation bias).
