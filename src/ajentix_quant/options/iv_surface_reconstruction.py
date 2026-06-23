@@ -10,6 +10,7 @@ kept outside ``OptionLeg`` on the dataclasses below.
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -37,9 +38,7 @@ from ajentix_quant.research.vrp_free_preregistration import (
 )
 
 SCHEMA_VERSION = "aq-vrp-free-iv-surface-reconstruction-v1"
-TRANSFORM_VERSION = (
-    "ajentix-quant/g003-" + str(PLAN_RECONSTRUCTION_CONFIG["method_version"])
-)
+TRANSFORM_VERSION = "ajentix-quant/g003-" + str(PLAN_RECONSTRUCTION_CONFIG["method_version"])
 LINEAGE_FILE = "reconstruction_lineage.jsonl"
 INCONCLUSIVE_STATUS = "INCONCLUSIVE"
 
@@ -203,6 +202,40 @@ def reconstruct_iv_surface_at(
     every output instrument is backed by one observed trade row.
     """
 
+    trades_sorted = sorted(trades, key=_trade_sort_key)
+    trade_ts = [trade.timestamp_ms for trade in trades_sorted]
+    points = tuple(index_path) if index_path is not None else _index_path_from_trades(trades)
+    points_sorted = sorted(points, key=lambda item: item.timestamp_ms)
+    point_ts = [point.timestamp_ms for point in points_sorted]
+    return _reconstruct_chains_at(
+        trades_sorted,
+        trade_ts,
+        points_sorted,
+        point_ts,
+        snapshot_ts_ms=snapshot_ts_ms,
+        scenario_id=scenario_id,
+        required_instrument_names=required_instrument_names,
+    )
+
+
+def _reconstruct_chains_at(
+    trades_sorted: Sequence[ParsedDeribitOptionTrade],
+    trade_ts: Sequence[int],
+    points_sorted: Sequence[IndexPathPoint],
+    point_ts: Sequence[int],
+    *,
+    snapshot_ts_ms: int,
+    scenario_id: str = DEFAULT_SCENARIO_ID,
+    required_instrument_names: Sequence[str] = (),
+) -> tuple[ReconstructedOptionChain, ...]:
+    """Reconstruct chains at one snapshot from pre-sorted trade/index views.
+
+    ``trades_sorted``/``points_sorted`` must be ascending (by ``_trade_sort_key`` and
+    ``timestamp_ms``) with ``trade_ts``/``point_ts`` their parallel timestamp lists, so the
+    eligible staleness window is located with bisect instead of re-sorting the full history
+    at every grid timestamp. Output is identical to scanning the full history per snapshot.
+    """
+
     snapshot_ts_ms = _require_int(snapshot_ts_ms, "snapshot_ts_ms", positive=True)
     if scenario_id != DEFAULT_SCENARIO_ID:
         raise IVSurfaceCoverageError(
@@ -211,14 +244,15 @@ def reconstruct_iv_surface_at(
         )
     _validate_reconstruction_config()
     max_staleness_ms = _max_staleness_ms()
-    points = tuple(index_path) if index_path is not None else _index_path_from_trades(trades)
     index_point = _latest_index_point(
-        points,
+        points_sorted,
+        point_ts,
         snapshot_ts_ms=snapshot_ts_ms,
         max_staleness_ms=max_staleness_ms,
     )
     latest_by_instrument = _latest_eligible_trade_by_instrument(
-        trades,
+        trades_sorted,
+        trade_ts,
         snapshot_ts_ms=snapshot_ts_ms,
         max_staleness_ms=max_staleness_ms,
     )
@@ -264,13 +298,20 @@ def reconstruct_iv_surface(
 ) -> tuple[ReconstructedOptionChain, ...]:
     """Reconstruct deterministic chains for the supplied snapshot timestamps."""
 
+    trades_sorted = sorted(trades, key=_trade_sort_key)
+    trade_ts = [trade.timestamp_ms for trade in trades_sorted]
+    points = tuple(index_path) if index_path is not None else _index_path_from_trades(trades)
+    points_sorted = sorted(points, key=lambda item: item.timestamp_ms)
+    point_ts = [point.timestamp_ms for point in points_sorted]
     chains: list[ReconstructedOptionChain] = []
     for ts_ms in _normalize_timestamps(snapshot_timestamps_ms, "snapshot_timestamps_ms"):
         chains.extend(
-            reconstruct_iv_surface_at(
-                trades,
+            _reconstruct_chains_at(
+                trades_sorted,
+                trade_ts,
+                points_sorted,
+                point_ts,
                 snapshot_ts_ms=ts_ms,
-                index_path=index_path,
                 scenario_id=scenario_id,
             )
         )
@@ -379,9 +420,7 @@ def write_reconstructed_chain_cache(
         if SourceQuality(str(value)) in {SourceQuality.FIXTURE, SourceQuality.PROXY}
     )
     manifest["reconstruction_schema_version"] = SCHEMA_VERSION
-    manifest["reconstruction_method_version"] = str(
-        PLAN_RECONSTRUCTION_CONFIG["method_version"]
-    )
+    manifest["reconstruction_method_version"] = str(PLAN_RECONSTRUCTION_CONFIG["method_version"])
     manifest["reconstruction_config"] = dict(PLAN_RECONSTRUCTION_CONFIG)
     manifest["settlement"] = dict(PLAN_SETTLEMENT)
     manifest["stress_rule"] = dict(PLAN_STRESS_RULE)
@@ -573,17 +612,17 @@ def _leg_from_trade(
 
 
 def _latest_eligible_trade_by_instrument(
-    trades: Sequence[ParsedDeribitOptionTrade],
+    trades_sorted: Sequence[ParsedDeribitOptionTrade],
+    trade_ts: Sequence[int],
     *,
     snapshot_ts_ms: int,
     max_staleness_ms: int,
 ) -> dict[str, ParsedDeribitOptionTrade]:
     latest: dict[str, ParsedDeribitOptionTrade] = {}
-    for trade in sorted(trades, key=_trade_sort_key):
-        if trade.timestamp_ms > snapshot_ts_ms:
-            continue
-        if snapshot_ts_ms - trade.timestamp_ms > max_staleness_ms:
-            continue
+    lo = bisect.bisect_left(trade_ts, snapshot_ts_ms - max_staleness_ms)
+    hi = bisect.bisect_right(trade_ts, snapshot_ts_ms)
+    for idx in range(lo, hi):
+        trade = trades_sorted[idx]
         if trade.expiry_ms <= snapshot_ts_ms:
             continue
         previous = latest.get(trade.instrument_name)
@@ -593,22 +632,19 @@ def _latest_eligible_trade_by_instrument(
 
 
 def _latest_index_point(
-    points: Sequence[IndexPathPoint],
+    points_sorted: Sequence[IndexPathPoint],
+    point_ts: Sequence[int],
     *,
     snapshot_ts_ms: int,
     max_staleness_ms: int,
 ) -> IndexPathPoint:
-    latest: IndexPathPoint | None = None
-    for point in sorted(points, key=lambda item: item.timestamp_ms):
-        if point.timestamp_ms <= snapshot_ts_ms:
-            latest = point
-        else:
-            break
-    if latest is None:
+    pos = bisect.bisect_right(point_ts, snapshot_ts_ms)
+    if pos == 0:
         raise IVSurfaceCoverageError(
             "missing_index_coverage",
             f"no observed index_price at or before {snapshot_ts_ms}",
         )
+    latest = points_sorted[pos - 1]
     if snapshot_ts_ms - latest.timestamp_ms > max_staleness_ms:
         raise IVSurfaceCoverageError(
             "stale_index_coverage",
@@ -675,9 +711,7 @@ def _observed_price_tick(trade: ParsedDeribitOptionTrade) -> float:
             raise IVSurfaceCoverageError("invalid_price_precision", "invalid trade price") from exc
         exponent = decimal.as_tuple().exponent
         if not isinstance(exponent, int):
-            raise IVSurfaceCoverageError(
-                "invalid_price_precision", "non-finite trade price"
-            )
+            raise IVSurfaceCoverageError("invalid_price_precision", "non-finite trade price")
         places = max(places, max(0, -exponent))
     tick = float(Decimal(1).scaleb(-places))
     return _require_positive(tick, "min_tick")
@@ -731,11 +765,7 @@ def _lineage_text(chains: Sequence[ReconstructedOptionChain]) -> str:
 
 def _lineage_manifest(chains: Sequence[ReconstructedOptionChain]) -> dict[str, Any]:
     source_trade_ids = sorted(
-        {
-            leg.source_trade_id
-            for chain in chains
-            for leg in chain.lineage.legs
-        }
+        {leg.source_trade_id for chain in chains for leg in chain.lineage.legs}
     )
     snapshot_timestamps = sorted({chain.snapshot.snapshot_ts_ms for chain in chains})
     return {
