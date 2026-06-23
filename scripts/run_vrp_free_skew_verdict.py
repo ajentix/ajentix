@@ -69,6 +69,7 @@ SCHEMA_VERSION = "aq-vrp-free-skew-verdict-runner-v1"
 REPORT_STEM = "vrp_free_skew_verdict"
 _MS_PER_DAY = 86_400_000
 _DIAGNOSTIC_MAX_QUOTE_AGE_S = 10**9
+_HOUR_MS = 3_600_000
 
 
 def _resolve(repo_root: Path, path: str | Path) -> Path:
@@ -324,6 +325,41 @@ def _diagnostic_cost_budget(
     }
 
 
+def _stress_grid_root_cause(index_path: Sequence[Any]) -> dict[str, Any]:
+    """Explain why frozen exact-underlying stress could not run on free data.
+
+    The frozen stress rule requires a regular hourly index grid (24h windows plus a
+    trailing 30d hourly history). The free trade-derived index path is event-timestamped
+    and in practice never lands on exact-hour boundaries, so no candidate window can be
+    formed without separately-gated hourly resampling. Every value here is a real
+    measurement of the supplied index path, not a fabricated number.
+    """
+    points = [int(point.timestamp_ms) for point in index_path]
+    on_hour = sum(1 for ts in points if ts % _HOUR_MS == 0)
+    if points and on_hour == 0:
+        code = "FREE_INDEX_PATH_NOT_HOURLY_GRID"
+        detail = (
+            f"free trade-derived index path has no exact-hour points ({on_hour}/{len(points)}); "
+            "frozen exact-underlying stress requires a regular hourly grid (24h windows + "
+            "trailing 30d hourly coverage). running stress on free data would require "
+            "separately-gated hourly index resampling, which this non-gating runner does not "
+            "perform. this is a structural basis limitation, not a data-quantity shortfall"
+        )
+    else:
+        code = "INSUFFICIENT_STRESS_WINDOW_COVERAGE"
+        detail = (
+            "fewer than the frozen k non-overlapping 24h windows have full trailing 30d "
+            "hourly coverage in the supplied bounded index path"
+        )
+    return {
+        "code": code,
+        "detail": detail,
+        "index_points": len(points),
+        "on_hour_points": on_hour,
+        "fabricated": False,
+    }
+
+
 def _diagnostic_stress(
     *,
     structures: Sequence[DefinedRiskStructure],
@@ -360,6 +396,7 @@ def _diagnostic_stress(
     )
     if not stress.ran:
         payload["status"] = "not_applicable"
+        payload["root_cause"] = _stress_grid_root_cause(index_path)
     return payload
 
 
@@ -608,6 +645,7 @@ def _markdown_report(payload: Mapping[str, Any]) -> str:
     diag_cost = diagnostics["cost_budget"]
     bw = payload["bounded_window"]
     diag_reasons = ", ".join(diag_stress.get("reason_codes", [])) or "-"
+    diag_root = (diag_stress.get("root_cause") or {}).get("code", "-")
     obs_rows = diag_cost["observed_quantile_rows_resolved"]
     frozen_rows = diag_cost["frozen_resolution_rows_resolved"]
     diag_note = (
@@ -641,6 +679,7 @@ def _markdown_report(payload: Mapping[str, Any]) -> str:
         f"- diagnostic_stress_status: `{diag_stress.get('status')}`",
         f"- diagnostic_stress_ran: `{diag_stress.get('ran')}`",
         f"- diagnostic_stress_reason_codes: `{diag_reasons}`",
+        f"- diagnostic_stress_root_cause: `{diag_root}`",
         f"- diagnostic_cost_observed_quantile_rows_resolved: `{obs_rows}`",
         f"- diagnostic_cost_frozen_resolution_rows_resolved: `{frozen_rows}`",
         "",

@@ -207,3 +207,27 @@ def test_skew_runner_wires_effective_spread_stress_cost_and_writes_reports(
     assert payload["official"]["walk_forward"]["stress_ran"] is True
     assert payload["official"]["cost_budget"]["evidence_count"] == 1
     assert payload["diagnostics"]["cost_budget"]["observed_quantile_rows_resolved"] == 1
+
+
+def test_stress_grid_root_cause_flags_non_hourly_free_index_path() -> None:
+    # Trade-time index path: no point lands on an exact-hour boundary.
+    irregular = tuple(
+        SimpleNamespace(timestamp_ms=1_730_419_200_000 + offset)
+        for offset in (11_161, 30_534, 37_011)
+    )
+    root = runner._stress_grid_root_cause(irregular)
+    assert root["code"] == "FREE_INDEX_PATH_NOT_HOURLY_GRID"
+    assert root["on_hour_points"] == 0
+    assert root["index_points"] == 3
+    assert root["fabricated"] is False
+
+
+def test_stress_grid_root_cause_flags_sparse_hourly_coverage() -> None:
+    # On-the-hour points exist but are too sparse for the frozen k windows.
+    hourly = tuple(
+        SimpleNamespace(timestamp_ms=1_730_419_200_000 + i * runner._HOUR_MS) for i in range(3)
+    )
+    root = runner._stress_grid_root_cause(hourly)
+    assert root["code"] == "INSUFFICIENT_STRESS_WINDOW_COVERAGE"
+    assert root["on_hour_points"] == 3
+    assert root["fabricated"] is False
