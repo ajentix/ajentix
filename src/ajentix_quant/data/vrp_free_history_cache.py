@@ -181,31 +181,59 @@ def _positive_float(value: object, label: str) -> float:
 _NON_PRICED_QUOTE_FIELDS = ("iv", "mark_price")
 
 
-def _is_non_priced_print(row: Mapping[str, Any]) -> bool:
-    """True for non-priced Deribit prints (block/combo) that carry no usable quote.
+def _is_genuine_no_quote_value(row: Mapping[str, Any], field: str) -> bool:
+    """True only for Deribit quote absence, not quote-field type corruption."""
+    if field not in row or row[field] is None:
+        return True
+    value = row[field]
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        num = float(value)
+        return not math.isfinite(num) or num <= 0.0
+    return False
 
-    A row is non-priced when its ``iv`` or ``mark_price`` is missing/None/non-
-    positive/non-finite. Such prints (e.g. block/combo trades) have no usable
-    implied vol or fair quote for IV-surface reconstruction and are excluded +
-    counted (never fabricated). Only iv/mark_price are treated as the benign
-    no-quote class; index_price, amount, instrument, timestamp, etc. stay strict so
-    the canonical parser still fails loud on genuine structural corruption. Rows
-    whose iv/mark_price are present-but-non-numeric are NOT excluded here so the
-    strict parser raises on them too.
+
+def _is_strict_positive_quote_value(value: object) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        num = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(num) and num > 0.0
+
+
+def _is_non_priced_print(row: Mapping[str, Any]) -> bool:
+    """True for structurally valid Deribit prints that carry no usable quote.
+
+    A row is excluded only when ``iv`` or ``mark_price`` is genuinely absent as a
+    quote (missing/None/non-positive-or-non-finite real number) and the row would
+    parse successfully once those two quote fields are replaced with positive
+    sentinel prices. Boolean, non-numeric, and otherwise invalid quote values are
+    not treated as no-quote prints; they pass through to the strict parser so type
+    corruption still fails loud.
     """
+
+    has_no_quote = any(
+        _is_genuine_no_quote_value(row, field) for field in _NON_PRICED_QUOTE_FIELDS
+    )
+    if not has_no_quote:
+        return False
+
     for field in _NON_PRICED_QUOTE_FIELDS:
         if field not in row or row[field] is None:
-            return True
-        value = row[field]
-        if isinstance(value, bool):
-            return True
-        try:
-            num = float(value)
-        except (TypeError, ValueError):
+            continue
+        if _is_genuine_no_quote_value(row, field):
+            continue
+        if not _is_strict_positive_quote_value(row[field]):
             return False
-        if not math.isfinite(num) or num <= 0.0:
-            return True
-    return False
+
+    probe = dict(row)
+    probe["iv"] = 1.0
+    probe["mark_price"] = 1.0
+    parse_deribit_history_trade(probe)
+    return True
 
 
 def partition_iv_bearing_trades(
@@ -213,11 +241,11 @@ def partition_iv_bearing_trades(
 ) -> tuple[tuple[dict[str, Any], ...], int]:
     """Partition usable priced rows from benign non-priced Deribit prints.
 
-    Excludes and counts non-priced prints (missing/None/non-positive/non-finite
-    ``iv`` or ``mark_price``) which carry no usable implied vol or fair quote
-    for IV-surface reconstruction. Every other row passes through unchanged so the
-    strict parser still fails loud on genuine structural corruption downstream.
-    Exclusion is honest data omission, never fabrication.
+    Excludes and counts only structurally valid non-priced prints. Candidate rows
+    with missing/None/non-positive/non-finite real ``iv`` or ``mark_price`` are
+    probed through the strict parser using positive sentinel quote fields; any
+    other structural corruption raises immediately instead of being hidden behind
+    the no-quote accounting. Exclusion is honest data omission, never fabrication.
     """
 
     usable_rows: list[dict[str, Any]] = []
@@ -385,18 +413,27 @@ def build_coverage_manifest(
     *,
     start_ts_ms: int,
     end_ts_ms: int,
+    coverage_start_ts_ms: int | None = None,
     max_time_gap_ms: int = _DEFAULT_MAX_TIME_GAP_MS,
     stress_windows: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Build the deterministic coverage section for a raw-source manifest."""
+    """Build the deterministic coverage section for a raw-source manifest.
 
+    ``coverage_start_ts_ms`` (default ``start_ts_ms``) is the first timestamp the 8h
+    snapshot grid is REQUIRED to cover. Trades/index may extend earlier (warmup) so
+    the opening required grid points have a preceding index within staleness; warmup
+    before ``coverage_start_ts_ms`` is not itself grid-required.
+    """
+
+    coverage_start = start_ts_ms if coverage_start_ts_ms is None else coverage_start_ts_ms
+    _require(coverage_start >= start_ts_ms, "coverage_start_ts_ms must be >= start_ts_ms")
     _validate_trade_sequence(trades, start_ts_ms, end_ts_ms)
     index_path = _index_path_from_trades(trades)
     _validate_time_gaps(index_path, max_time_gap_ms)
     grid = _snapshot_grid_coverage(
         trades,
         index_path,
-        start_ts_ms=start_ts_ms,
+        coverage_start_ts_ms=coverage_start,
         end_ts_ms=end_ts_ms,
         max_time_gap_ms=max_time_gap_ms,
     )
@@ -436,38 +473,48 @@ def _validate_trade_sequence(
         previous = key
 
 
-_MAX_SAME_MS_INDEX_REL_DIFF = 0.002
+_MAX_SAME_MS_INDEX_EXTREME_DIFF = 0.05
 
 
 def _index_path_from_trades(
     trades: Sequence[ParsedDeribitOptionTrade],
 ) -> tuple[IndexPathPoint, ...]:
-    by_timestamp: dict[int, IndexPathPoint] = {}
+    """Build the underlying index path from real per-trade index_price observations.
+
+    Real Deribit history can carry several trades at one millisecond whose index_price
+    differs slightly as the index ticks sub-millisecond. For each millisecond the
+    underlying must agree (else fail loud); the index_price is reconciled to the
+    lower-median REAL observed reading (never an interpolated/fabricated value). A
+    same-millisecond spread above ``_MAX_SAME_MS_INDEX_EXTREME_DIFF`` is not physical
+    index movement and fails closed as genuine corruption.
+    """
+    readings: dict[int, list[float]] = {}
+    underlyings: dict[int, str] = {}
     for trade in trades:
-        point = IndexPathPoint(
-            timestamp_ms=trade.timestamp_ms,
-            underlying=trade.underlying,
-            index_price=trade.index_price,
+        ts = trade.timestamp_ms
+        prev_underlying = underlyings.get(ts)
+        if prev_underlying is not None:
+            _require(
+                prev_underlying == trade.underlying,
+                f"conflicting underlying at timestamp {ts}",
+            )
+        else:
+            underlyings[ts] = trade.underlying
+        readings.setdefault(ts, []).append(trade.index_price)
+
+    path: list[IndexPathPoint] = []
+    for ts in sorted(readings):
+        values = sorted(readings[ts])
+        spread = (values[-1] - values[0]) / values[0] if values[0] > 0 else float("inf")
+        _require(
+            spread <= _MAX_SAME_MS_INDEX_EXTREME_DIFF,
+            f"conflicting index_price at timestamp {ts}",
         )
-        previous = by_timestamp.get(point.timestamp_ms)
-        if previous is not None:
-            _require(
-                previous.underlying == point.underlying,
-                f"conflicting underlying at timestamp {point.timestamp_ms}",
-            )
-            # Same-millisecond trades can report marginally different index_price as
-            # the Deribit index ticks sub-millisecond. Tolerate that sub-ms noise
-            # within a tight relative bound and deterministically keep the first
-            # (stable-sorted) real observation; fail loud on a large conflict, which
-            # signals genuine corruption rather than sub-ms index movement.
-            rel_diff = abs(previous.index_price - point.index_price) / previous.index_price
-            _require(
-                rel_diff <= _MAX_SAME_MS_INDEX_REL_DIFF,
-                f"conflicting index_price at timestamp {point.timestamp_ms}",
-            )
-            continue
-        by_timestamp[point.timestamp_ms] = point
-    return tuple(by_timestamp[ts] for ts in sorted(by_timestamp))
+        chosen = values[(len(values) - 1) // 2]
+        path.append(
+            IndexPathPoint(timestamp_ms=ts, underlying=underlyings[ts], index_price=chosen)
+        )
+    return tuple(path)
 
 
 def _validate_time_gaps(points: Sequence[IndexPathPoint], max_time_gap_ms: int) -> None:
@@ -567,11 +614,11 @@ def _snapshot_grid_coverage(
     trades: Sequence[ParsedDeribitOptionTrade],
     points: Sequence[IndexPathPoint],
     *,
-    start_ts_ms: int,
+    coverage_start_ts_ms: int,
     end_ts_ms: int,
     max_time_gap_ms: int,
 ) -> dict[str, Any]:
-    required = _required_grid_timestamps(trades, start_ts_ms, end_ts_ms)
+    required = _required_grid_timestamps(trades, coverage_start_ts_ms, end_ts_ms)
     covered: list[int] = []
     missing: list[int] = []
     support_by_grid: dict[str, int] = {}
@@ -698,6 +745,8 @@ def _index_path_manifest(points: Sequence[IndexPathPoint], text: str) -> dict[st
         "underlying": underlyings[0],
         "exact": True,
         "fabricated": False,
+        "same_ms_collision_reconciliation": "lower_median_real_observed_reading",
+        "same_ms_max_rel_spread_threshold": _MAX_SAME_MS_INDEX_EXTREME_DIFF,
         "row_count": len(points),
         "date_range": {
             "start_ts_ms": points[0].timestamp_ms,
@@ -724,6 +773,7 @@ def write_vrp_free_history_cache(
     source_url_ids: Sequence[str],
     source_quality: Mapping[str, SourceQuality | str] | None = None,
     acquisition_tool_version: str = GENERATOR_VERSION,
+    coverage_start_ts_ms: int | None = None,
     max_time_gap_ms: int = _DEFAULT_MAX_TIME_GAP_MS,
     stress_windows: Sequence[Mapping[str, Any]] | None = None,
 ) -> Path:
@@ -736,10 +786,12 @@ def write_vrp_free_history_cache(
     _validate_trade_sequence(trades, start_ts_ms, end_ts_ms)
     index_path = _index_path_from_trades(trades)
     _validate_time_gaps(index_path, max_time_gap_ms)
+    coverage_start = start_ts_ms if coverage_start_ts_ms is None else coverage_start_ts_ms
     coverage = build_coverage_manifest(
         trades,
         start_ts_ms=start_ts_ms,
         end_ts_ms=end_ts_ms,
+        coverage_start_ts_ms=coverage_start,
         max_time_gap_ms=max_time_gap_ms,
         stress_windows=stress_windows,
     )
@@ -760,7 +812,11 @@ def write_vrp_free_history_cache(
         "currency": currency.upper(),
         "exchange": "deribit",
         "endpoint": "public/get_last_trades_by_currency_and_time",
-        "date_range": {"start_ts_ms": start_ts_ms, "end_ts_ms": end_ts_ms},
+        "date_range": {
+            "start_ts_ms": start_ts_ms,
+            "end_ts_ms": end_ts_ms,
+            "coverage_start_ts_ms": coverage_start,
+        },
         "download_timestamp_ms": _int_value(download_timestamp_ms, "download_timestamp_ms"),
         "source_ids": sorted(set(map(str, source_ids))),
         "source_url_ids": source_urls,
@@ -839,10 +895,16 @@ def load_vrp_free_history_cache(
     date_range = _require_mapping(manifest.get("date_range"), "date_range missing")
     validation = _require_mapping(manifest.get("validation"), "validation missing")
     max_gap = _int_value(validation.get("max_time_gap_ms"), "validation.max_time_gap_ms")
+    start_ts_ms = _int_value(date_range.get("start_ts_ms"), "date_range.start_ts_ms")
+    coverage_start_ts_ms = _int_value(
+        date_range.get("coverage_start_ts_ms", start_ts_ms),
+        "date_range.coverage_start_ts_ms",
+    )
     coverage = build_coverage_manifest(
         trades,
-        start_ts_ms=_int_value(date_range.get("start_ts_ms"), "date_range.start_ts_ms"),
+        start_ts_ms=start_ts_ms,
         end_ts_ms=_int_value(date_range.get("end_ts_ms"), "date_range.end_ts_ms"),
+        coverage_start_ts_ms=coverage_start_ts_ms,
         max_time_gap_ms=max_gap,
         stress_windows=_manifest_stress_windows(manifest),
     )

@@ -99,16 +99,40 @@ def _write_fixture_cache(root: Path) -> Path:
 
 
 def test_partition_iv_bearing_trades_excludes_non_priced_prints_and_preserves_order():
+    base_rows = _fixture_rows()
+
+    def make_row(
+        index: int,
+        trade_id: str,
+        *,
+        iv: object = 12.5,
+        mark_price: object = 0.05,
+        omit_iv: bool = False,
+        omit_mark_price: bool = False,
+    ) -> dict:
+        row = dict(base_rows[index % len(base_rows)])
+        row["trade_id"] = trade_id
+        row["trade_seq"] = 9_000 + index
+        if omit_iv:
+            row.pop("iv", None)
+        else:
+            row["iv"] = iv
+        if omit_mark_price:
+            row.pop("mark_price", None)
+        else:
+            row["mark_price"] = mark_price
+        return row
+
     rows = [
-        {"trade_id": "valid-a", "iv": 12.5, "mark_price": 0.05},
-        {"trade_id": "iv-zero", "iv": 0.0, "mark_price": 0.05},
-        {"trade_id": "iv-none", "iv": None, "mark_price": 0.05},
-        {"trade_id": "iv-missing", "mark_price": 0.05},
-        {"trade_id": "iv-negative", "iv": -1.0, "mark_price": 0.05},
-        {"trade_id": "iv-nan", "iv": float("nan"), "mark_price": 0.05},
-        {"trade_id": "mark-zero", "iv": 12.5, "mark_price": 0.0},
-        {"trade_id": "mark-missing", "iv": 12.5},
-        {"trade_id": "valid-b", "iv": "3.25", "mark_price": "0.07"},
+        make_row(0, "valid-a", iv=12.5, mark_price=0.05),
+        make_row(1, "iv-zero", iv=0.0, mark_price=0.05),
+        make_row(2, "iv-none", iv=None, mark_price=0.05),
+        make_row(3, "iv-missing", mark_price=0.05, omit_iv=True),
+        make_row(4, "iv-negative", iv=-1.0, mark_price=0.05),
+        make_row(5, "iv-nan", iv=float("nan"), mark_price=0.05),
+        make_row(6, "mark-zero", iv=12.5, mark_price=0.0),
+        make_row(7, "mark-missing", iv=12.5, omit_mark_price=True),
+        make_row(8, "valid-b", iv="3.25", mark_price="0.07"),
     ]
 
     usable_rows, excluded_count = partition_iv_bearing_trades(rows)
@@ -119,17 +143,39 @@ def test_partition_iv_bearing_trades_excludes_non_priced_prints_and_preserves_or
     assert excluded_count == 7
 
 
-def test_partition_iv_bearing_trades_does_not_mask_non_iv_corruption(tmp_path):
+def test_partition_iv_bearing_trades_fails_loud_on_corruption_behind_no_quote():
     rows = _fixture_rows()
     corrupted = dict(rows[0])
+    corrupted["iv"] = 0.0
     corrupted.pop("index_price")
     rows[0] = corrupted
 
-    usable_rows, excluded_count = partition_iv_bearing_trades(rows)
-
-    assert excluded_count == 0
-    assert usable_rows[0] is corrupted
     with pytest.raises(VrpFreeHistoryCacheValidationError, match="index_price"):
+        partition_iv_bearing_trades(rows)
+
+
+def test_partition_iv_bearing_trades_excludes_structurally_sound_no_quote_print():
+    row = dict(_fixture_rows()[0])
+    row["iv"] = 0.0
+    row["mark_price"] = 0.0
+
+    usable_rows, excluded_count = partition_iv_bearing_trades([row])
+
+    assert usable_rows == ()
+    assert excluded_count == 1
+
+
+@pytest.mark.parametrize(("field", "value"), [("iv", True), ("mark_price", False)])
+def test_boolean_quote_values_are_not_excluded_and_fail_strict_parser(tmp_path, field, value):
+    row = dict(_fixture_rows()[0])
+    row["trade_id"] = f"fixture-boolean-{field}"
+    row[field] = value
+
+    usable_rows, excluded_count = partition_iv_bearing_trades([row])
+
+    assert usable_rows == (row,)
+    assert excluded_count == 0
+    with pytest.raises(VrpFreeHistoryCacheValidationError, match=field):
         write_vrp_free_history_cache(
             tmp_path,
             DEFAULT_SCENARIO_ID,
@@ -243,6 +289,38 @@ def test_coverage_manifest_math_for_expiry_strike_type_dte_moneyness_fold_grid_a
     assert (scenario_dir / "manifest.json").is_file()
 
 
+def test_warmup_cache_load_round_trips_with_later_coverage_start(tmp_path):
+    write_vrp_free_history_cache(
+        tmp_path,
+        DEFAULT_SCENARIO_ID,
+        raw_rows=_fixture_rows(),
+        currency="ETH",
+        start_ts_ms=START_MS,
+        end_ts_ms=END_MS,
+        download_timestamp_ms=START_MS,
+        source_ids=["fixture-deribit-history"],
+        source_url_ids=["fixture://vrp-free-history/eth-option-trades"],
+        source_quality={
+            "option_trades": SourceQuality.FIXTURE,
+            "underlying_index": SourceQuality.FIXTURE,
+        },
+        coverage_start_ts_ms=MID_MS,
+        stress_windows=STRESS_WINDOWS,
+    )
+
+    loaded = load_vrp_free_history_cache(tmp_path, DEFAULT_SCENARIO_ID)
+
+    assert loaded.manifest["date_range"] == {
+        "start_ts_ms": START_MS,
+        "end_ts_ms": END_MS,
+        "coverage_start_ts_ms": MID_MS,
+    }
+    assert loaded.manifest["coverage"]["snapshot_grid_8h"]["required_timestamps_ms"] == [
+        MID_MS,
+        END_MS,
+    ]
+
+
 @pytest.mark.parametrize("field", ["iv", "index_price", "amount"])
 def test_fail_closed_on_missing_required_trade_inputs(tmp_path, field):
     rows = _fixture_rows()
@@ -296,12 +374,17 @@ def test_exact_underlying_index_path_manifest_and_conflict_detection(tmp_path):
     assert index_manifest["source_field"] == "trade_rows.index_price"
     assert index_manifest["exact"] is True
     assert index_manifest["fabricated"] is False
+    assert (
+        index_manifest["same_ms_collision_reconciliation"]
+        == "lower_median_real_observed_reading"
+    )
+    assert index_manifest["same_ms_max_rel_spread_threshold"] == pytest.approx(0.05)
     assert index_manifest["timestamps_ms"] == [START_MS, MID_MS, END_MS]
 
     rows = _fixture_rows()
     conflict = dict(rows[1])
     conflict["trade_id"] = "fixture-conflicting-index"
-    conflict["index_price"] = 2600.0
+    conflict["index_price"] = 3000.0
     rows.append(conflict)
     with pytest.raises(VrpFreeHistoryCacheValidationError, match="conflicting index_price"):
         write_vrp_free_history_cache(

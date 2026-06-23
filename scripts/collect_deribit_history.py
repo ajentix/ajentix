@@ -91,6 +91,8 @@ def _collect(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
 
     start_ms = _parse_iso_ms(args.start)
     end_ms = _parse_iso_ms(args.end)
+    coverage_start_raw = getattr(args, "coverage_start", None)
+    coverage_start_ms = _parse_iso_ms(coverage_start_raw) if coverage_start_raw else start_ms
     if start_ms > end_ms:
         return _blocked(
             args,
@@ -140,6 +142,7 @@ def _collect(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
             raw_rows=usable_rows,
             currency=args.currency.upper(),
             start_ts_ms=start_ms,
+            coverage_start_ts_ms=coverage_start_ms,
             end_ts_ms=end_ms,
             download_timestamp_ms=_now_ms(),
             source_ids=[f"deribit-history:{args.currency.upper()}:option-trades"],
@@ -220,6 +223,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--currency", default="ETH", choices=["ETH"])
     parser.add_argument("--from", dest="start", required=True, help="ISO8601 start timestamp")
     parser.add_argument("--to", dest="end", required=True, help="ISO8601 end timestamp")
+    parser.add_argument(
+        "--coverage-from",
+        dest="coverage_start",
+        default=None,
+        help="ISO8601 first timestamp the 8h grid must cover (default --from); "
+        "data before it is warmup.",
+    )
     parser.add_argument("--scenario-id", default=DEFAULT_SCENARIO_ID)
     parser.add_argument("--raw-source-root", required=True)
     parser.add_argument("--reports-dir", default="reports")
