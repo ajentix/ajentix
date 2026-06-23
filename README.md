@@ -81,8 +81,24 @@ python scripts/run_backtest.py    # runs the funding-harvest backtest on sample 
 
 Research/engineering project. Crypto trading carries substantial risk including total loss. "Delta-neutral" is **not** risk-free (funding-regime, basis-compression, liquidation, ADL, exchange-counterparty, gap risk). Nothing here is financial advice.
 
-## Status — VRP free-data feasibility (Phase 5)
+## Status — VRP free-data feasibility: terminal `NO_GO`
 
-Funding-harvest is `NO_GO` out-of-sample for the current small-capital framing. ETH Deribit defined-risk short-vol / VRP is the surviving candidate, but the free-data-native feasibility build is bounded: reconstructed chains plus Tardis-free sampled spread calibration can only produce `NO_GO`, `PROMISING_PENDING_REAL_SPREAD`, or `INCONCLUSIVE`; capital `GO` is structurally impossible from this evidence class.
+Funding-harvest is `NO_GO` OOS. ETH Deribit defined-risk short-vol / VRP was the surviving
+candidate; the full free-data-native pipeline has now been **run end-to-end on real Deribit
+history** (5,086,803 deduped real trades, coverage 2024-09 → 2026-06; 1,915 reconstructed
+snapshots; real F1–F7 walk-forward; 64,223 effective-spread cost samples; `cache_fabricated=false`).
 
-Current build verdict: `INCONCLUSIVE` pending real FREE Deribit-history and Tardis-free sample collection. Any capital step requires continuous real-spread confirmation from paid Tardis, Deribit partnership/free tier, or equivalent. See [`docs/research/vrp_free_feasibility_status.md`](docs/research/vrp_free_feasibility_status.md).
+**Terminal verdict: `NO_GO`** (non-authorizing; capital `GO` was always structurally impossible
+from reconstructed + effective-spread source quality). Findings:
+- **ATM variance premium is dead**; the only real premium is the **OTM put-skew**, which is
+  **thin (≈10–17% of width) and fat-tailed** → marginal-to-negative after costs once a hard
+  defined-risk cap is applied. No clean retail edge at $500–2000.
+- The official walk-forward selected **zero structures in all 7 folds**, exposing a latent
+  **unit bug in the frozen, immutable strategy** (`vrp_defined_risk.py`, first commit): the entry
+  gate compares ETH-denominated credit against USD strike-width with no conversion. The pipeline
+  fails closed correctly; frozen code was not modified.
+- Effective round-trip cost is small (**p50 ≈ $2.5–4 / p75 ≈ $4–7**) and absorbable — costs were
+  never the blocker; the premium is.
+
+Full write-up: [`docs/research/full_frozen_run_findings.md`](docs/research/full_frozen_run_findings.md).
+No capital authorized. Next research direction is open.
