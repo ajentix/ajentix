@@ -1,0 +1,120 @@
+{
+  "artifact_content_hash": "ee640d95be916ca015b548716c3274bbac2b5671bc6fc8b3e1cba93b602f6178",
+  "artifact_id": "vrp-free-precalibration-b694ab301d31",
+  "calibration_output_required": false,
+  "emittable_before_calibration": true,
+  "precalibration_config": {
+    "binning": {
+      "absolute_log_moneyness_buckets": {
+        "atm": [
+          0.0,
+          0.03
+        ],
+        "far": [
+          0.15,
+          0.3
+        ],
+        "near": [
+          0.03,
+          0.08
+        ],
+        "wing": [
+          0.08,
+          0.15
+        ]
+      },
+      "dte_buckets_days": {
+        "dte_21": [
+          14,
+          27
+        ],
+        "dte_30": [
+          28,
+          38
+        ],
+        "dte_45": [
+          39,
+          60
+        ]
+      },
+      "fallback_order": [
+        "option_type+dte_bucket+moneyness_bucket+regime_label",
+        "option_type+dte_bucket+moneyness_bucket",
+        "option_type+dte_bucket",
+        "option_type+moneyness_bucket",
+        "fail_closed"
+      ],
+      "fallback_spread_selection": "max_available_quantile_not_lower_than_narrower_children",
+      "option_types": [
+        "put",
+        "call"
+      ]
+    },
+    "cost_budget_bar": {
+      "fail_closed_when_bin_unavailable": true,
+      "median_spread_margin_multiplier": 1.5,
+      "min_distinct_months_per_bin": 6,
+      "min_samples_per_bin": 30,
+      "min_valid_months_per_calendar_quarter": 2,
+      "min_valid_rows_per_required_month": 100,
+      "missing_required_month_behavior": "INCONCLUSIVE",
+      "post_calibration_threshold_change_behavior": "INVALID",
+      "require_net_credit_to_width_after_p75_safety": true,
+      "spread_quantile": "p75",
+      "spread_safety_multiplier": 1.25,
+      "units": "round_trip_structure_spread_usd"
+    },
+    "fail_closed_rules": {
+      "insufficient_bin_samples": "INCONCLUSIVE",
+      "missing_calibration_output": "INCONCLUSIVE",
+      "missing_precalibration_artifact": "INVALID",
+      "missing_required_month": "INCONCLUSIVE",
+      "post_calibration_config_change": "INVALID",
+      "venue_masquerade": "INVALID_LINEAGE"
+    },
+    "fold_causal_calibration_rule": "fold selection and verdict gates use only calibration samples with sample_timestamp <= fold.train_end; all-sample calibration may be diagnostic only and cannot improve verdict",
+    "promising_confirmation_trigger": "PROMISING_PENDING_REAL_SPREAD authorizes only a continuous real-spread confirmation via paid Tardis trial, Deribit partnership free tier, or equivalent; it does not authorize capital",
+    "regime_labels": {
+      "high_vol": "0.60 < trailing_30d_rv_annualized <= 1.00 or 0.08 <= abs_24h_return < 0.12",
+      "normal": "trailing_30d_rv_annualized <= 0.60 and abs_24h_return < 0.08",
+      "tail": "trailing_30d_rv_annualized > 1.00 or abs_24h_return >= 0.12"
+    },
+    "sample_months": [
+      "2024-08-01",
+      "2024-09-01",
+      "2024-10-01",
+      "2024-11-01",
+      "2024-12-01",
+      "2025-01-01",
+      "2025-02-01",
+      "2025-03-01",
+      "2025-04-01",
+      "2025-05-01",
+      "2025-06-01",
+      "2025-07-01",
+      "2025-08-01",
+      "2025-09-01",
+      "2025-10-01",
+      "2025-11-01",
+      "2025-12-01",
+      "2026-01-01",
+      "2026-02-01",
+      "2026-03-01",
+      "2026-04-01",
+      "2026-05-01",
+      "2026-06-01"
+    ],
+    "scenario_id": "deribit_history_eth_vrp_free_v1",
+    "schema_version": "vrp-free-precalibration-v1",
+    "unit_conversions": {
+      "deribit_option_price_unit": "ETH per 1 ETH contract",
+      "round_trip_leg_crossing_usd": "spread_price_eth * index_price_usd * contract_multiplier * quantity",
+      "round_trip_structure_spread_usd": "sum(round_trip_leg_crossing_usd for both legs)",
+      "spread_price_eth": "max(ask_price - bid_price, 0)",
+      "vol_points": "iv_fraction * 100"
+    }
+  },
+  "precalibration_config_sha256": "b694ab301d31fddb049e5b593fbdb3a91e836f1dd27f76ae86c03d7c9dcb2143",
+  "scenario_id": "deribit_history_eth_vrp_free_v1",
+  "schema_version": "vrp-free-precalibration-v1"
+}

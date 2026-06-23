@@ -80,3 +80,9 @@ python scripts/run_backtest.py    # runs the funding-harvest backtest on sample 
 ## Disclaimer
 
 Research/engineering project. Crypto trading carries substantial risk including total loss. "Delta-neutral" is **not** risk-free (funding-regime, basis-compression, liquidation, ADL, exchange-counterparty, gap risk). Nothing here is financial advice.
+
+## Status — VRP free-data feasibility (Phase 5)
+
+Funding-harvest is `NO_GO` out-of-sample for the current small-capital framing. ETH Deribit defined-risk short-vol / VRP is the surviving candidate, but the free-data-native feasibility build is bounded: reconstructed chains plus Tardis-free sampled spread calibration can only produce `NO_GO`, `PROMISING_PENDING_REAL_SPREAD`, or `INCONCLUSIVE`; capital `GO` is structurally impossible from this evidence class.
+
+Current build verdict: `INCONCLUSIVE` pending real FREE Deribit-history and Tardis-free sample collection. Any capital step requires continuous real-spread confirmation from paid Tardis, Deribit partnership/free tier, or equivalent. See [`docs/research/vrp_free_feasibility_status.md`](docs/research/vrp_free_feasibility_status.md).
