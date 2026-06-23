@@ -489,6 +489,9 @@ def _chain_from_expiry_trades(
     return ReconstructedOptionChain(snapshot=snapshot, lineage=lineage)
 
 
+_BS_VALUE_USD_EPS = 1e-6
+
+
 def _leg_from_trade(
     trade: ParsedDeribitOptionTrade,
     *,
@@ -508,8 +511,16 @@ def _leg_from_trade(
         time_to_expiry_years=time_to_expiry,
         volatility=iv_fraction,
     )
+    if greeks.value < -_BS_VALUE_USD_EPS:
+        raise IVSurfaceCoverageError(
+            "invalid_numeric",
+            f"model value meaningfully negative: {greeks.value}",
+        )
+    # A Black-Scholes value is mathematically non-negative; floor sub-epsilon
+    # floating-point noise (far-OTM / very-short-time options worth ~0) to exactly 0.
+    # This corrects numerical error, not fabrication; meaningful negatives fail loud above.
     model_price_eth = _require_non_negative(
-        greeks.value / index_price,
+        max(0.0, greeks.value) / index_price,
         "model_price_eth",
     )
     quote_age_s = _require_non_negative(
