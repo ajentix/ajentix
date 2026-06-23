@@ -16,8 +16,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from ajentix_quant.adapters.base import SourceQuality  # noqa: E402
 from ajentix_quant.adapters.deribit_history import DeribitHistoryTradeProvider  # noqa: E402
 from ajentix_quant.data.vrp_free_history_cache import (  # noqa: E402
+    DEFAULT_MAX_NON_IV_BEARING_RATE,
     GENERATOR_VERSION,
     SCHEMA_VERSION,
+    partition_iv_bearing_trades,
     sha256_text,
     write_vrp_free_history_cache,
 )
@@ -106,11 +108,36 @@ def _collect(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
             count=args.count,
             chunk_ms=int(args.chunk_hours * 60 * 60 * 1000),
         )
+        usable_rows, excluded_non_iv_count = partition_iv_bearing_trades(rows)
+        total_fetched = len(rows)
+        max_non_iv_rate = float(args.max_non_iv_bearing_rate)
+        non_iv_rate = excluded_non_iv_count / total_fetched if total_fetched else 0.0
+        non_iv_accounting = {
+            "total_fetched": total_fetched,
+            "non_iv_bearing_excluded": excluded_non_iv_count,
+            "non_iv_bearing_rate": non_iv_rate,
+            "max_non_iv_bearing_rate": max_non_iv_rate,
+        }
+        if total_fetched > 0 and non_iv_rate > max_non_iv_rate:
+            payload = _blocked(
+                args,
+                STATUS_DATA_BLOCKER,
+                ["EXCESSIVE_NON_IV_BEARING_ROWS"],
+                error=(
+                    "non-IV-bearing Deribit history rows exceed max rate: "
+                    f"{excluded_non_iv_count}/{total_fetched}={non_iv_rate:.6f} "
+                    f"> {max_non_iv_rate:.6f}"
+                ),
+                network_attempted=True,
+            )
+            payload.update(non_iv_accounting)
+            return payload
+
         raw_root = _resolve(repo_root, args.raw_source_root)
         scenario_dir = write_vrp_free_history_cache(
             raw_root,
             args.scenario_id,
-            raw_rows=rows,
+            raw_rows=usable_rows,
             currency=args.currency.upper(),
             start_ts_ms=start_ms,
             end_ts_ms=end_ms,
@@ -137,13 +164,15 @@ def _collect(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
     payload.update(
         {
             "network_attempted": True,
-            "trade_rows": len(rows),
+            "trade_rows": len(usable_rows),
+            **non_iv_accounting,
             "cache_writes": [scenario_dir.as_posix()],
             "raw_manifest_sha256": sha256_text(manifest_text),
             "note": (
-                "Cache contains observed Deribit public history trade rows only. Missing "
-                "required IV/index/amount/grid coverage fails closed; no synthetic rows "
-                "are written."
+                "Cache contains observed Deribit public history trade rows only. "
+                "Non-IV-bearing rows are excluded only when below the configured "
+                "max rate; missing required index/amount/grid coverage fails closed; "
+                "no synthetic rows are written."
             ),
         }
     )
@@ -197,6 +226,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--count", type=int, default=1_000)
     parser.add_argument("--chunk-hours", type=float, default=1.0)
     parser.add_argument("--rate-limit-s", type=float, default=0.25)
+    parser.add_argument(
+        "--max-non-iv-bearing-rate",
+        type=float,
+        default=DEFAULT_MAX_NON_IV_BEARING_RATE,
+        help="Fail closed when excluded non-IV-bearing rows exceed this fetched-row rate.",
+    )
     parser.add_argument("--json", action="store_true", help="Print report payload as JSON.")
     parser.add_argument(
         "--repo-root",

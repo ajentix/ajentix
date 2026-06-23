@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 import pytest
+from scripts import collect_deribit_history
 
 from ajentix_quant.adapters.base import SourceQuality
 from ajentix_quant.data.vrp_free_history_cache import (
+    DEFAULT_MAX_NON_IV_BEARING_RATE,
     INDEX_PATH_FILE,
     TRADES_FILE,
     VrpFreeHistoryCacheValidationError,
     load_vrp_free_history_cache,
     load_vrp_free_history_manifest,
+    partition_iv_bearing_trades,
     sha256_text,
     write_vrp_free_history_cache,
 )
@@ -33,6 +37,47 @@ def _fixture_rows() -> list[dict]:
     return [json.loads(line) for line in FIXTURE_PATH.read_text(encoding="utf-8").splitlines()]
 
 
+def _make_unique_fixture_rows(count: int) -> list[dict]:
+    base_rows = _fixture_rows()
+    rows: list[dict] = []
+    for index in range(count):
+        row = dict(base_rows[index % len(base_rows)])
+        row["trade_id"] = f"collector-valid-{index:04d}"
+        row["trade_seq"] = index + 1
+        rows.append(row)
+    return rows
+
+
+def _collector_args(
+    tmp_path: Path, max_non_iv_bearing_rate: float = DEFAULT_MAX_NON_IV_BEARING_RATE
+):
+    return argparse.Namespace(
+        currency="ETH",
+        start="2024-09-01T00:00:00Z",
+        end="2024-09-01T16:00:00Z",
+        scenario_id=DEFAULT_SCENARIO_ID,
+        raw_source_root="raw",
+        reports_dir="reports",
+        count=1_000,
+        chunk_hours=1.0,
+        rate_limit_s=0.0,
+        max_non_iv_bearing_rate=max_non_iv_bearing_rate,
+    )
+
+
+def _patch_collector_provider(monkeypatch: pytest.MonkeyPatch, rows: list[dict]) -> None:
+    class FakeProvider:
+        endpoint = "fixture://deribit-history"
+
+        def __init__(self, rate_limit_s: float):
+            self.rate_limit_s = rate_limit_s
+
+        def fetch_option_trades(self, **_kwargs):
+            return [dict(row) for row in rows]
+
+    monkeypatch.setattr(collect_deribit_history, "DeribitHistoryTradeProvider", FakeProvider)
+
+
 def _write_fixture_cache(root: Path) -> Path:
     return write_vrp_free_history_cache(
         root,
@@ -51,6 +96,99 @@ def _write_fixture_cache(root: Path) -> Path:
         acquisition_tool_version="fixture-vrp-free-history-v1",
         stress_windows=STRESS_WINDOWS,
     )
+
+
+def test_partition_iv_bearing_trades_excludes_non_priced_prints_and_preserves_order():
+    rows = [
+        {"trade_id": "valid-a", "iv": 12.5, "mark_price": 0.05},
+        {"trade_id": "iv-zero", "iv": 0.0, "mark_price": 0.05},
+        {"trade_id": "iv-none", "iv": None, "mark_price": 0.05},
+        {"trade_id": "iv-missing", "mark_price": 0.05},
+        {"trade_id": "iv-negative", "iv": -1.0, "mark_price": 0.05},
+        {"trade_id": "iv-nan", "iv": float("nan"), "mark_price": 0.05},
+        {"trade_id": "mark-zero", "iv": 12.5, "mark_price": 0.0},
+        {"trade_id": "mark-missing", "iv": 12.5},
+        {"trade_id": "valid-b", "iv": "3.25", "mark_price": "0.07"},
+    ]
+
+    usable_rows, excluded_count = partition_iv_bearing_trades(rows)
+
+    assert [row["trade_id"] for row in usable_rows] == ["valid-a", "valid-b"]
+    assert usable_rows[0] is rows[0]
+    assert usable_rows[1] is rows[-1]
+    assert excluded_count == 7
+
+
+def test_partition_iv_bearing_trades_does_not_mask_non_iv_corruption(tmp_path):
+    rows = _fixture_rows()
+    corrupted = dict(rows[0])
+    corrupted.pop("index_price")
+    rows[0] = corrupted
+
+    usable_rows, excluded_count = partition_iv_bearing_trades(rows)
+
+    assert excluded_count == 0
+    assert usable_rows[0] is corrupted
+    with pytest.raises(VrpFreeHistoryCacheValidationError, match="index_price"):
+        write_vrp_free_history_cache(
+            tmp_path,
+            DEFAULT_SCENARIO_ID,
+            raw_rows=usable_rows,
+            currency="ETH",
+            start_ts_ms=START_MS,
+            end_ts_ms=END_MS,
+            download_timestamp_ms=START_MS,
+            source_ids=["fixture-deribit-history"],
+            source_url_ids=["fixture://vrp-free-history/eth-option-trades"],
+            source_quality={"option_trades": SourceQuality.FIXTURE},
+            stress_windows=STRESS_WINDOWS,
+        )
+
+
+def test_collector_excludes_non_iv_rows_below_threshold_and_reports_accounting(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("CI", raising=False)
+    rows = _make_unique_fixture_rows(10)
+    non_iv_row = dict(rows[0])
+    non_iv_row["trade_id"] = "collector-non-iv-0001"
+    non_iv_row["trade_seq"] = 10_001
+    non_iv_row["iv"] = 0.0
+    rows.insert(3, non_iv_row)
+    _patch_collector_provider(monkeypatch, rows)
+
+    payload = collect_deribit_history._collect(_collector_args(tmp_path), tmp_path)
+
+    assert payload["status"] == collect_deribit_history.STATUS_POPULATED
+    assert payload["total_fetched"] == 11
+    assert payload["non_iv_bearing_excluded"] == 1
+    assert payload["non_iv_bearing_rate"] == pytest.approx(1 / 11)
+    assert payload["max_non_iv_bearing_rate"] == DEFAULT_MAX_NON_IV_BEARING_RATE
+    assert payload["trade_rows"] == 10
+    loaded = load_vrp_free_history_cache(tmp_path / "raw", DEFAULT_SCENARIO_ID)
+    assert len(loaded.raw_rows) == 10
+    assert all(float(row["iv"]) > 0.0 for row in loaded.raw_rows)
+
+
+def test_collector_fails_closed_when_non_iv_rows_exceed_threshold(tmp_path, monkeypatch):
+    monkeypatch.delenv("CI", raising=False)
+    rows = _make_unique_fixture_rows(6)
+    non_iv_row = dict(rows[0])
+    non_iv_row["trade_id"] = "collector-non-iv-0001"
+    non_iv_row["trade_seq"] = 10_001
+    non_iv_row["iv"] = None
+    rows.append(non_iv_row)
+    _patch_collector_provider(monkeypatch, rows)
+
+    payload = collect_deribit_history._collect(_collector_args(tmp_path), tmp_path)
+
+    assert payload["status"] == collect_deribit_history.STATUS_DATA_BLOCKER
+    assert payload["reason_codes"] == ["EXCESSIVE_NON_IV_BEARING_ROWS"]
+    assert payload["total_fetched"] == 7
+    assert payload["non_iv_bearing_excluded"] == 1
+    assert payload["non_iv_bearing_rate"] == pytest.approx(1 / 7)
+    assert payload["max_non_iv_bearing_rate"] == DEFAULT_MAX_NON_IV_BEARING_RATE
+    assert not (tmp_path / "raw" / DEFAULT_SCENARIO_ID).exists()
 
 
 def test_raw_manifest_reproducibility_and_no_network_loader(tmp_path):
@@ -163,7 +301,7 @@ def test_exact_underlying_index_path_manifest_and_conflict_detection(tmp_path):
     rows = _fixture_rows()
     conflict = dict(rows[1])
     conflict["trade_id"] = "fixture-conflicting-index"
-    conflict["index_price"] = 2501.0
+    conflict["index_price"] = 2600.0
     rows.append(conflict)
     with pytest.raises(VrpFreeHistoryCacheValidationError, match="conflicting index_price"):
         write_vrp_free_history_cache(
@@ -179,6 +317,38 @@ def test_exact_underlying_index_path_manifest_and_conflict_detection(tmp_path):
             source_quality={"option_trades": SourceQuality.FIXTURE},
             stress_windows=STRESS_WINDOWS,
         )
+
+def test_sub_ms_index_noise_within_tolerance_is_reconciled(tmp_path):
+    # Two real same-millisecond trades can report marginally different index_price as
+    # the Deribit index ticks sub-millisecond. A tiny relative diff (within tolerance)
+    # is deterministically reconciled to the first stable-sorted observation, not
+    # failed-closed and never fabricated.
+    rows = _fixture_rows()
+    noisy = dict(rows[1])
+    noisy["trade_id"] = "fixture-subms-index-noise"
+    noisy["trade_seq"] = int(rows[1]["trade_seq"]) + 1000
+    noisy["index_price"] = 2500.5  # +0.02% vs 2500.0 at START_MS, within tolerance
+    rows.append(noisy)
+
+    write_vrp_free_history_cache(
+        tmp_path / "noise",
+        DEFAULT_SCENARIO_ID,
+        raw_rows=rows,
+        currency="ETH",
+        start_ts_ms=START_MS,
+        end_ts_ms=END_MS,
+        download_timestamp_ms=START_MS,
+        source_ids=["fixture-deribit-history"],
+        source_url_ids=["fixture://vrp-free-history/eth-option-trades"],
+        source_quality={
+            "option_trades": SourceQuality.FIXTURE,
+            "underlying_index": SourceQuality.FIXTURE,
+        },
+        stress_windows=STRESS_WINDOWS,
+    )
+    loaded = load_vrp_free_history_cache(tmp_path / "noise", DEFAULT_SCENARIO_ID)
+    start_point = next(p for p in loaded.index_path if p.timestamp_ms == START_MS)
+    assert start_point.index_price == 2500.0
 
 
 def test_loader_fails_closed_on_sha_mismatch_without_network(tmp_path):

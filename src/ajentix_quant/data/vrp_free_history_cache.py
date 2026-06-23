@@ -31,6 +31,8 @@ from ajentix_quant.research.vrp_free_preregistration import (
 SCHEMA_VERSION = "aq-vrp-free-history-cache-v1"
 RAW_MANIFEST_KIND = "raw_source"
 GENERATOR_VERSION = "ajentix-quant/g002-vrp-free-history-cache-v1"
+DEFAULT_MAX_NON_IV_BEARING_RATE = 0.10
+
 TRADES_FILE = "trades.jsonl"
 INDEX_PATH_FILE = "index_path.csv"
 
@@ -174,6 +176,58 @@ def _positive_float(value: object, label: str) -> float:
     if out <= 0.0:
         raise VrpFreeHistoryCacheValidationError(f"{label} must be positive")
     return out
+
+
+_NON_PRICED_QUOTE_FIELDS = ("iv", "mark_price")
+
+
+def _is_non_priced_print(row: Mapping[str, Any]) -> bool:
+    """True for non-priced Deribit prints (block/combo) that carry no usable quote.
+
+    A row is non-priced when its ``iv`` or ``mark_price`` is missing/None/non-
+    positive/non-finite. Such prints (e.g. block/combo trades) have no usable
+    implied vol or fair quote for IV-surface reconstruction and are excluded +
+    counted (never fabricated). Only iv/mark_price are treated as the benign
+    no-quote class; index_price, amount, instrument, timestamp, etc. stay strict so
+    the canonical parser still fails loud on genuine structural corruption. Rows
+    whose iv/mark_price are present-but-non-numeric are NOT excluded here so the
+    strict parser raises on them too.
+    """
+    for field in _NON_PRICED_QUOTE_FIELDS:
+        if field not in row or row[field] is None:
+            return True
+        value = row[field]
+        if isinstance(value, bool):
+            return True
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(num) or num <= 0.0:
+            return True
+    return False
+
+
+def partition_iv_bearing_trades(
+    rows: Iterable[dict[str, Any]],
+) -> tuple[tuple[dict[str, Any], ...], int]:
+    """Partition usable priced rows from benign non-priced Deribit prints.
+
+    Excludes and counts non-priced prints (missing/None/non-positive/non-finite
+    ``iv`` or ``mark_price``) which carry no usable implied vol or fair quote
+    for IV-surface reconstruction. Every other row passes through unchanged so the
+    strict parser still fails loud on genuine structural corruption downstream.
+    Exclusion is honest data omission, never fabrication.
+    """
+
+    usable_rows: list[dict[str, Any]] = []
+    excluded_non_iv_count = 0
+    for row in rows:
+        if _is_non_priced_print(row):
+            excluded_non_iv_count += 1
+        else:
+            usable_rows.append(row)
+    return tuple(usable_rows), excluded_non_iv_count
 
 
 def _nonnegative_float(value: object, label: str) -> float:
@@ -382,6 +436,9 @@ def _validate_trade_sequence(
         previous = key
 
 
+_MAX_SAME_MS_INDEX_REL_DIFF = 0.002
+
+
 def _index_path_from_trades(
     trades: Sequence[ParsedDeribitOptionTrade],
 ) -> tuple[IndexPathPoint, ...]:
@@ -395,10 +452,20 @@ def _index_path_from_trades(
         previous = by_timestamp.get(point.timestamp_ms)
         if previous is not None:
             _require(
-                previous.underlying == point.underlying
-                and previous.index_price == point.index_price,
+                previous.underlying == point.underlying,
+                f"conflicting underlying at timestamp {point.timestamp_ms}",
+            )
+            # Same-millisecond trades can report marginally different index_price as
+            # the Deribit index ticks sub-millisecond. Tolerate that sub-ms noise
+            # within a tight relative bound and deterministically keep the first
+            # (stable-sorted) real observation; fail loud on a large conflict, which
+            # signals genuine corruption rather than sub-ms index movement.
+            rel_diff = abs(previous.index_price - point.index_price) / previous.index_price
+            _require(
+                rel_diff <= _MAX_SAME_MS_INDEX_REL_DIFF,
                 f"conflicting index_price at timestamp {point.timestamp_ms}",
             )
+            continue
         by_timestamp[point.timestamp_ms] = point
     return tuple(by_timestamp[ts] for ts in sorted(by_timestamp))
 
