@@ -420,10 +420,15 @@ def _build_payload(args: argparse.Namespace) -> dict[str, Any]:
         raw_dataset.index_path,
     )
 
-    bounded_folds = _bounded_single_window_fold(
-        coverage_start_ms=coverage_start_ms,
-        coverage_end_ms=coverage_end_ms,
-    )
+    if getattr(args, "use_frozen_folds", False):
+        bounded_folds = tuple(dict(fold) for fold in free_walk_runner.PLAN_FOLDS)
+        fold_mode = "frozen_plan_folds"
+    else:
+        bounded_folds = _bounded_single_window_fold(
+            coverage_start_ms=coverage_start_ms,
+            coverage_end_ms=coverage_end_ms,
+        )
+        fold_mode = "bounded_single_window"
     branches, test_backtests, fold_structures, evaluations, fold_details = _fold_inputs_for_folds(
         snapshots,
         symbol=args.symbol.upper(),
@@ -546,6 +551,7 @@ def _build_payload(args: argparse.Namespace) -> dict[str, Any]:
             "coverage_trade_count": len(coverage_trades),
             "snapshot_count": len(snapshots),
             "folds": list(bounded_folds),
+            "fold_mode": fold_mode,
         },
         "spread_basis": {
             "source_basis": EFFECTIVE_SPREAD_SOURCE_BASIS,
@@ -562,8 +568,8 @@ def _build_payload(args: argparse.Namespace) -> dict[str, Any]:
         "official": {
             "note": (
                 "Official walk-forward remains fail-closed and does not bypass train-clearing "
-                "branch selection. Stress/cost inputs are wired, but no selected official "
-                "structures exist in this bounded cache."
+                "branch selection. Stress/cost inputs are wired; structures feed the official "
+                "verdict only when a fold's train window actually clears them."
             ),
             "walk_forward": walk_payload,
             "stress_attempt": official_stress_attempt.as_dict(),
@@ -715,6 +721,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbol", default="ETH", choices=["ETH"])
     parser.add_argument("--reports-dir", default="reports")
     parser.add_argument("--diagnostic-max-structures", type=int, default=6)
+    parser.add_argument(
+        "--use-frozen-folds",
+        action="store_true",
+        help=(
+            "Run the real frozen PLAN_FOLDS (F1-F7) walk-forward instead of the single "
+            "bounded coverage-window fold. Use for a full-coverage real cache."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Print the report payload as JSON.")
     args = parser.parse_args(argv)
 
