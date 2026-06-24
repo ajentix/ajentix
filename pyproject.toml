@@ -1,0 +1,34 @@
+[project]
+name = "ajentix-alpha"
+version = "0.1.0"
+description = "Retail opportunistic capital-growth toolkit: free-data opportunity scanners; manual on-chain execution by the user."
+requires-python = ">=3.11"
+dependencies = []  # source is stdlib-only by design (deterministic, auditable, no supply-chain surface)
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ajentix_alpha"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/ajentix_alpha", "scripts", "tests"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
