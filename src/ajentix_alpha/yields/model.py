@@ -11,8 +11,11 @@ documented constant — no hidden optimism.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Any
+
+from .prices import coin_key
 
 # --- frozen, documented risk constants ------------------------------------------------------------
 MIN_TVL_USD = 1_000_000.0  # below this, exit liquidity is unreliable -> excluded
@@ -25,6 +28,13 @@ UNSTABLE_CV = 0.5  # sigma/mu above this -> flag UNSTABLE
 IL_FACTOR_STABLE_MULTI = 0.85  # both-stable multi-asset: small IL haircut
 IL_FACTOR_VOLATILE = 0.6  # volatile IL exposure: large haircut
 SIGMA_FLOOR = 0.1  # avoid divide-by-zero in stability
+# --- optional price-risk (depeg) constants; only used when a price snapshot is supplied -----------
+PEG_WATCH_DEV = 0.005  # |price-1| >= 0.5% -> DEPEG_WATCH (soft, linear haircut begins)
+PEG_BREAK_DEV = 0.02  # |price-1| >= 2% -> DEPEG (hard: net APY zeroed, never CORE)
+PEG_MIN_CONFIDENCE = 0.9  # ignore prices below this oracle confidence (cannot verify)
+# --- optional protocol-risk constants; only used when a protocols snapshot is supplied ------------
+YOUNG_PROTOCOL_DAYS = 180  # listed under ~6 months ago -> YOUNG_PROTOCOL (less battle-tested)
+_SECONDS_PER_DAY = 86_400.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -46,6 +56,7 @@ class Pool:
     exposure: str
     outlier: bool
     reward_tokens: tuple[str, ...]
+    underlying_tokens: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -56,6 +67,7 @@ class ScoredPool:
     reward_haircut_apy: float  # apy after only the reward-stickiness haircut
     il_factor: float
     flags: tuple[str, ...]
+    peg_deviation: float = 0.0  # worst |price-1| across underlying stables (0 = none / unverified)
 
 
 def _num(row: dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -70,6 +82,7 @@ def _num(row: dict[str, Any], key: str, default: float = 0.0) -> float:
 def parse_pool(row: dict[str, Any]) -> Pool:
     """Parse one raw DefiLlama pool row, coercing safely (missing numerics -> 0/defaults)."""
     reward = row.get("rewardTokens") or ()
+    underlying = row.get("underlyingTokens") or ()
     return Pool(
         pool_id=str(row.get("pool", "")),
         chain=str(row.get("chain", "")),
@@ -88,6 +101,7 @@ def parse_pool(row: dict[str, Any]) -> Pool:
         exposure=str(row.get("exposure", "")),
         outlier=bool(row.get("outlier", False)),
         reward_tokens=tuple(str(t) for t in reward) if isinstance(reward, list) else (),
+        underlying_tokens=tuple(str(t) for t in underlying) if isinstance(underlying, list) else (),
     )
 
 
@@ -108,8 +122,80 @@ def passes_universe(pool: Pool) -> bool:
     )
 
 
-def score_pool(pool: Pool) -> ScoredPool:
-    """Conservative net APY + tier + flags. Pure and deterministic."""
+def _peg_assessment(
+    pool: Pool, prices: dict[str, dict[str, Any]]
+) -> tuple[float, float, list[str]]:
+    """Worst peg deviation across a stablecoin pool's underlying tokens, as a net-APY haircut.
+
+    Returns (peg_factor, peg_deviation, flags). Non-stablecoin pools, and prices that are missing or
+    below PEG_MIN_CONFIDENCE, are skipped (no adjustment -> no false alarm). peg_factor in [0,1]:
+    1.0 below the watch threshold, linear down to 0.0 at the break threshold (a broken peg is
+    principal loss, not a yield opportunity).
+    """
+    if not pool.stablecoin or not prices:
+        return 1.0, 0.0, []
+    worst = 0.0
+    verified = False
+    for addr in pool.underlying_tokens:
+        if not addr or addr.startswith("0x0000000000000000000000000000000000000000"):
+            continue
+        info = prices.get(coin_key(pool.chain, addr))
+        if not isinstance(info, dict):
+            continue
+        price = info.get("price")
+        conf = info.get("confidence", 1.0)
+        if not isinstance(price, (int, float)):
+            continue
+        if isinstance(conf, (int, float)) and conf < PEG_MIN_CONFIDENCE:
+            continue
+        verified = True
+        worst = max(worst, abs(float(price) - 1.0))
+    if not verified:
+        return 1.0, 0.0, []
+    if worst >= PEG_BREAK_DEV:
+        return 0.0, worst, ["DEPEG"]
+    if worst >= PEG_WATCH_DEV:
+        factor = (PEG_BREAK_DEV - worst) / (PEG_BREAK_DEV - PEG_WATCH_DEV)
+        return max(0.0, min(1.0, factor)), worst, ["DEPEG_WATCH"]
+    return 1.0, worst, []
+
+
+def _protocol_risk(pool: Pool, protocols: dict[str, dict[str, Any]], now_ts: float) -> list[str]:
+    """Protocol flags from audit count + listing age. UNKNOWN_PROTOCOL when the slug is absent."""
+    info = protocols.get(pool.project)
+    if not isinstance(info, dict):
+        return ["UNKNOWN_PROTOCOL"]
+    flags: list[str] = []
+    audits = info.get("audits")
+    try:
+        n_audits = int(audits) if audits is not None else 0
+    except (TypeError, ValueError):
+        n_audits = 0
+    if n_audits <= 0:
+        flags.append("UNAUDITED")
+    listed = info.get("listedAt")
+    if (
+        isinstance(listed, (int, float))
+        and not isinstance(listed, bool)
+        and listed > 0
+        and (now_ts - float(listed)) / _SECONDS_PER_DAY < YOUNG_PROTOCOL_DAYS
+    ):
+        flags.append("YOUNG_PROTOCOL")
+    return flags
+
+
+def score_pool(
+    pool: Pool,
+    *,
+    prices: dict[str, dict[str, Any]] | None = None,
+    protocols: dict[str, dict[str, Any]] | None = None,
+    now_ts: float | None = None,
+) -> ScoredPool:
+    """Conservative net APY + tier + flags. Pure/deterministic.
+
+    Optional price/protocol snapshots add depeg + protocol-risk flags and haircuts when supplied;
+    with neither (the default), behaviour is identical to the yields-only model.
+    """
     reward_share = pool.apy_reward / pool.apy if pool.apy > 0 else 0.0
     reward_share = min(max(reward_share, 0.0), 1.0)
     # Haircut only the reward portion of the *current* apy.
@@ -133,6 +219,14 @@ def score_pool(pool: Pool) -> ScoredPool:
     if pool.tvl_usd < CORE_MIN_TVL_USD:
         flags.append("THIN_TVL")
 
+    # Optional price-risk (depeg) haircut.
+    peg_factor, peg_dev, peg_flags = _peg_assessment(pool, prices or {})
+    flags.extend(peg_flags)
+    net_apy = max(0.0, net_apy * peg_factor)
+    # Optional protocol-risk flags.
+    if protocols is not None:
+        flags.extend(_protocol_risk(pool, protocols, now_ts if now_ts is not None else time.time()))
+
     is_core = (
         pool.stablecoin
         and pool.il_risk == "no"
@@ -140,6 +234,10 @@ def score_pool(pool: Pool) -> ScoredPool:
         and "UNSTABLE" not in flags
         and "SPIKE" not in flags
         and "REWARD_DEPENDENT" not in flags
+        and "DEPEG" not in flags
+        and "DEPEG_WATCH" not in flags
+        and "UNAUDITED" not in flags
+        and "YOUNG_PROTOCOL" not in flags
     )
     tier = "core" if is_core else "satellite"
     return ScoredPool(
@@ -149,11 +247,22 @@ def score_pool(pool: Pool) -> ScoredPool:
         reward_haircut_apy=reward_haircut_apy,
         il_factor=il_factor,
         flags=tuple(flags),
+        peg_deviation=peg_dev,
     )
 
 
-def rank_pools(rows: list[dict[str, Any]]) -> list[ScoredPool]:
+def rank_pools(
+    rows: list[dict[str, Any]],
+    *,
+    prices: dict[str, dict[str, Any]] | None = None,
+    protocols: dict[str, dict[str, Any]] | None = None,
+    now_ts: float | None = None,
+) -> list[ScoredPool]:
     """Parse -> universe-filter -> score -> sort by conservative net APY (desc), id tiebreak."""
-    scored = [score_pool(p) for p in (parse_pool(r) for r in rows) if passes_universe(p)]
+    scored = [
+        score_pool(p, prices=prices, protocols=protocols, now_ts=now_ts)
+        for p in (parse_pool(r) for r in rows)
+        if passes_universe(p)
+    ]
     scored.sort(key=lambda s: (-s.net_apy, s.pool.pool_id))
     return scored

@@ -16,6 +16,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from ajentix_alpha.yields import prices as px  # noqa: E402
+from ajentix_alpha.yields import protocols as pr  # noqa: E402
 from ajentix_alpha.yields.client import (  # noqa: E402
     archive_snapshot,
     fetch_pools,
@@ -43,6 +45,7 @@ def _row(s: ScoredPool) -> dict[str, Any]:
         "exposure": p.exposure,
         "history_days": p.count,
         "il_factor": s.il_factor,
+        "peg_deviation": round(s.peg_deviation, 5),
         "flags": list(s.flags),
         "pool_id": p.pool_id,
     }
@@ -137,6 +140,16 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="If > 0, also emit a capped $ allocation plan for this budget (USD).",
     )
+    parser.add_argument(
+        "--prices", action="store_true", help="Add depeg risk via free token prices (coins.llama)."
+    )
+    parser.add_argument(
+        "--protocols",
+        action="store_true",
+        help="Add protocol risk (audits/age) via the free DefiLlama protocols list.",
+    )
+    parser.add_argument("--prices-dir", default="data/cache/prices")
+    parser.add_argument("--protocols-dir", default="data/cache/protocols")
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -147,7 +160,36 @@ def main(argv: list[str] | None = None) -> int:
     else:
         snap = load_snapshot(cache_dir)
 
-    ranked = [s for s in rank_pools(list(snap.pools)) if s.net_apy >= args.min_net_apy]
+    price_map: dict[str, dict[str, Any]] | None = None
+    if args.prices:
+        prices_dir = repo_root / args.prices_dir
+        if args.fetch:
+            keys = px.stablecoin_coin_keys(list(snap.pools))
+            price_map = px.fetch_prices(keys)
+            px.write_snapshot(prices_dir, price_map)
+        else:
+            price_map = px.load_snapshot(prices_dir).prices
+
+    proto_index: dict[str, dict[str, Any]] | None = None
+    proto_now: float | None = None
+    if args.protocols:
+        protocols_dir = repo_root / args.protocols_dir
+        if args.fetch:
+            proto_index = pr.fetch_protocols()
+            psnap = pr.write_snapshot(protocols_dir, proto_index)
+            proto_now = psnap.fetched_at_epoch
+        else:
+            psnap = pr.load_snapshot(protocols_dir)
+            proto_index = psnap.by_slug
+            proto_now = psnap.fetched_at_epoch
+
+    ranked = [
+        s
+        for s in rank_pools(
+            list(snap.pools), prices=price_map, protocols=proto_index, now_ts=proto_now
+        )
+        if s.net_apy >= args.min_net_apy
+    ]
     core = [s for s in ranked if s.tier == "core"]
     sat = [s for s in ranked if s.tier == "satellite"]
 

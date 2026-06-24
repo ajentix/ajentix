@@ -39,6 +39,12 @@ impermanent-loss exposure, low TVL/liquidity, short history, reward-share (less 
 `scan_yields.py --fetch` to refresh the snapshot (each fetch is archived for monitoring) and write
 `reports/yield_opportunities.{json,md}`.
 
+Two optional risk layers harden the ranking when enabled (each from a free, unauthenticated feed,
+snapshotted and applied offline): `--prices` adds **depeg** detection (coins.llama.fi) — a stablecoin
+pool whose underlying drifts off $1 is haircut and barred from CORE; `--protocols` adds **protocol
+risk** (api.llama.fi) — unaudited or freshly-listed protocols are flagged and barred from CORE. With
+both, CORE means "deep, stable, *audited, established, on-peg*."
+
 ## Sizing: ranked sheet -> capped allocation plan
 
 A ranked sheet says *which* pools are worth it; `yields/sizing.py` says *how much* of a $500-2000
@@ -72,11 +78,32 @@ stablecoin pool." The baseline yield is auto-derived from the cached yields snap
 APY). Edit `data/airdrops/campaigns.json` (a template) and run `scan_airdrops.py` to emit
 `reports/airdrop_ev.{json,md}`.
 
+## Calibration: is the conservatism real?
+
+These are forward bets, not OOS-backtestable price edges, so this is **not a backtest and not a
+performance claim** — a feedback loop. `yields/validate.py` takes two archived snapshots and, for
+pools present in both, checks whether realized APY came in at or above the conservative net APY we
+quoted (the haircuts are meant to under-promise), whether SPIKE-flagged pools actually reverted, and
+whether CORE TVL held up better than SATELLITE. Run `validate_yields.py` over your history to emit
+`reports/calibration.{json,md}`. Short windows are weak signal; the report says so.
+
+## Rebalancing: holdings -> churn-aware moves
+
+`yields/rebalance.py` diffs what you **actually hold** against a freshly-sized target into concrete
+BUY / SELL / INCREASE / REDUCE / HOLD actions. A minimum-trade floor leaves dust-sized adjustments as
+HOLD so a small account isn't churned to death on gas, while risk exits always fire: a held pool that
+has dropped out of the ranked universe (degraded / gone) or carries a critical monitor alert is SOLD
+regardless of size (and its capital redeployed into survivors). Edit `data/holdings.json` (a
+template), then run `rebalance.py [--alerts reports/alerts.json]` to emit
+`reports/rebalance_plan.{json,md}`.
+
 ## Layout
 
 ```
-src/ajentix_alpha/yields/     # free yields client + snapshots, ranking, sizing, monitoring
+src/ajentix_alpha/yields/     # yields/price/protocol clients, ranking, sizing, monitoring,
+                              #   calibration, rebalancing
 src/ajentix_alpha/airdrops/   # airdrop / points EV model (user-supplied campaign inputs)
-scripts/                      # CLI report generators (scan_yields, monitor_yields, scan_airdrops)
+scripts/                      # CLI generators (scan_yields, monitor_yields, validate_yields,
+                              #   scan_airdrops, rebalance)
 tests/                        # deterministic unit tests (no network)
 ```
