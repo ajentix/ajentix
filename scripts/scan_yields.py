@@ -17,11 +17,13 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ajentix_alpha.yields.client import (  # noqa: E402
+    archive_snapshot,
     fetch_pools,
     load_snapshot,
     write_snapshot,
 )
 from ajentix_alpha.yields.model import ScoredPool, rank_pools  # noqa: E402
+from ajentix_alpha.yields.sizing import AllocationPlan, build_plan  # noqa: E402
 
 
 def _row(s: ScoredPool) -> dict[str, Any]:
@@ -85,6 +87,41 @@ def _md(core: list[ScoredPool], sat: list[ScoredPool], fetched_at: str, sha: str
     return "\n".join(lines) + "\n"
 
 
+def _alloc_md(plan: AllocationPlan, fetched_at: str, sha: str) -> str:
+    b = plan.budget_usd
+    lines = [
+        "# Allocation plan (capped, deterministic)",
+        "",
+        f"- source: DefiLlama free yields | fetched {fetched_at} | sha {sha[:12]}",
+        f"- budget: ${b:,.2f} | deployed ${plan.core_usd + plan.satellite_usd:,.2f} "
+        f"(core ${plan.core_usd:,.2f} / satellite ${plan.satellite_usd:,.2f}) | "
+        f"cash ${plan.cash_usd:,.2f}",
+        f"- expected net APY: {plan.blended_net_apy_on_budget:.2f}% on budget "
+        f"(idle cash counted as 0%) | {plan.blended_net_apy_on_allocated:.2f}% on deployed capital",
+        "- hard caps: satellite sleeve <= "
+        f"{plan.policy['satellite_cap_share'] * 100:.0f}% of budget; per-pool <= "
+        f"{plan.policy['core_max_per_pool_share'] * 100:.0f}% core / "
+        f"{plan.policy['satellite_max_per_pool_share'] * 100:.0f}% satellite; "
+        f"min position ${plan.policy['min_position_usd']:,.0f}.",
+        "- Agent builds the plan; you sign every transaction. Not financial advice. "
+        "DeFi = total-loss risk; modeled numbers, not guarantees.",
+        "",
+        "| tier | $ | % budget | net APY% | chain | project | symbol | flags |",
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- |",
+    ]
+    for p in plan.positions:
+        lines.append(
+            f"| {p.tier} | {p.usd:,.2f} | {p.weight_of_budget * 100:.1f} | {p.net_apy:.2f} | "
+            f"{p.chain} | {p.project} | {p.symbol} | {', '.join(p.flags) or '-'} |"
+        )
+    if plan.cash_usd > 0.0:
+        lines.append(
+            f"| cash | {plan.cash_usd:,.2f} | {plan.cash_usd / b * 100 if b else 0:.1f} | 0.00 | "
+            "- | undeployed | - | uncapped capacity reached |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -94,11 +131,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reports-dir", default="reports")
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument("--min-net-apy", type=float, default=0.0)
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=0.0,
+        help="If > 0, also emit a capped $ allocation plan for this budget (USD).",
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
     cache_dir = repo_root / args.cache_dir
-    snap = write_snapshot(cache_dir, fetch_pools()) if args.fetch else load_snapshot(cache_dir)
+    if args.fetch:
+        snap = write_snapshot(cache_dir, fetch_pools())
+        archive_snapshot(cache_dir, snap)  # retain a history point for over-time monitoring
+    else:
+        snap = load_snapshot(cache_dir)
 
     ranked = [s for s in rank_pools(list(snap.pools)) if s.net_apy >= args.min_net_apy]
     core = [s for s in ranked if s.tier == "core"]
@@ -129,6 +176,50 @@ def main(argv: list[str] | None = None) -> int:
     print(f"pools={snap.pool_count} ranked={len(ranked)} core={len(core)} satellite={len(sat)}")
     print(f"wrote={reports / 'yield_opportunities.json'}")
     print(f"wrote={reports / 'yield_opportunities.md'}")
+
+    if args.budget > 0.0:
+        plan = build_plan(ranked, args.budget)
+        plan_payload = {
+            "fetched_at_utc": snap.fetched_at_utc,
+            "snapshot_sha256": snap.sha256,
+            "budget_usd": plan.budget_usd,
+            "core_usd": plan.core_usd,
+            "satellite_usd": plan.satellite_usd,
+            "cash_usd": plan.cash_usd,
+            "blended_net_apy_on_budget_pct": round(plan.blended_net_apy_on_budget, 3),
+            "blended_net_apy_on_allocated_pct": round(plan.blended_net_apy_on_allocated, 3),
+            "policy": plan.policy,
+            "positions": [
+                {
+                    "tier": p.tier,
+                    "usd": p.usd,
+                    "weight_of_budget": round(p.weight_of_budget, 4),
+                    "net_apy_pct": round(p.net_apy, 3),
+                    "chain": p.chain,
+                    "project": p.project,
+                    "symbol": p.symbol,
+                    "flags": list(p.flags),
+                    "pool_id": p.pool_id,
+                }
+                for p in plan.positions
+            ],
+            "disclaimer": (
+                "Capped, deterministic sizing over modeled net APY. Idle cash earns 0%. "
+                "Agent builds the plan; the user signs every transaction. Not financial advice."
+            ),
+        }
+        (reports / "allocation_plan.json").write_text(
+            json.dumps(plan_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        (reports / "allocation_plan.md").write_text(
+            _alloc_md(plan, snap.fetched_at_utc, snap.sha256), encoding="utf-8"
+        )
+        print(
+            f"budget={plan.budget_usd:.2f} deployed={plan.core_usd + plan.satellite_usd:.2f} "
+            f"cash={plan.cash_usd:.2f} positions={len(plan.positions)}"
+        )
+        print(f"wrote={reports / 'allocation_plan.json'}")
+        print(f"wrote={reports / 'allocation_plan.md'}")
     return 0
 
 

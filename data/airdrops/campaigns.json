@@ -1,0 +1,38 @@
+{
+  "note": "EXAMPLE / TEMPLATE inputs only. These are illustrative, not real airdrop data or predictions. Replace every field with your own modeled estimates before trusting the EV output. probability is P(airdrop happens AND you qualify AND it is claimable); est_airdrop_usd is YOUR modeled gross value; confidence (high|med|low) applies an extra haircut; cost_usd is gas+bridge+ops.",
+  "campaigns": [
+    {
+      "name": "example-l2-points-season",
+      "chain": "Example-L2",
+      "capital_usd": 600.0,
+      "lock_days": 90,
+      "est_airdrop_usd": 350.0,
+      "probability": 0.45,
+      "cost_usd": 25.0,
+      "confidence": "med",
+      "deadline_days": 60
+    },
+    {
+      "name": "example-lst-restaking",
+      "chain": "Ethereum",
+      "capital_usd": 800.0,
+      "lock_days": 30,
+      "est_airdrop_usd": 220.0,
+      "probability": 0.6,
+      "cost_usd": 40.0,
+      "confidence": "high",
+      "deadline_days": 0
+    },
+    {
+      "name": "example-long-lock-lottery",
+      "chain": "Example-Chain",
+      "capital_usd": 500.0,
+      "lock_days": 365,
+      "est_airdrop_usd": 400.0,
+      "probability": 0.1,
+      "cost_usd": 30.0,
+      "confidence": "low",
+      "deadline_days": 5
+    }
+  ]
+}

@@ -95,3 +95,41 @@ def load_snapshot(root: str | Path) -> YieldsSnapshot:
         sha256=str(manifest["sha256"]),
         pools=tuple(pools),
     )
+
+
+def archive_snapshot(root: str | Path, snapshot: YieldsSnapshot) -> Path:
+    """Copy a snapshot into a timestamped, content-hashed history dir for over-time monitoring.
+
+    Each archive dir is self-contained (pools.json + manifest.json) and loadable by load_snapshot,
+    so the monitor can diff any two retained points. Re-archiving the same content is idempotent.
+    """
+    stamp = snapshot.fetched_at_utc.replace(":", "").replace("-", "")
+    out_dir = Path(root) / "history" / f"{stamp}-{snapshot.sha256[:8]}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    canonical = json.dumps(list(snapshot.pools), sort_keys=True, separators=(",", ":"))
+    (out_dir / "pools.json").write_text(canonical + "\n", encoding="utf-8")
+    (out_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fetched_at_utc": snapshot.fetched_at_utc,
+                "source_url": snapshot.source_url,
+                "pool_count": snapshot.pool_count,
+                "sha256": snapshot.sha256,
+                "fabricated": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return out_dir
+
+
+def list_history(root: str | Path) -> list[Path]:
+    """Return archived snapshot dirs (those containing a manifest.json), oldest first."""
+    hist = Path(root) / "history"
+    if not hist.is_dir():
+        return []
+    dirs = [d for d in hist.iterdir() if d.is_dir() and (d / "manifest.json").is_file()]
+    return sorted(dirs, key=lambda d: d.name)
