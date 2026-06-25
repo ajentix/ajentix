@@ -1,13 +1,10 @@
 # ajentix monorepo — shared dev-tooling config.
 #
-# Each package under packages/* keeps its own pyproject.toml for build/packaging and its own
-# (hierarchically-discovered) ruff/mypy settings. This root config drives one-command test/lint
-# across both packages from the repo root. It is intentionally NOT a buildable package itself.
-
-[tool.pytest.ini_options]
-pythonpath = ["packages/alpha/src", "packages/quant/src"]
-testpaths = ["packages/alpha/tests", "packages/quant/tests"]
-
+# Each package under packages/* is self-contained (its own pyproject.toml, src/, scripts/, tests/)
+# and keeps its own hierarchically-discovered ruff / mypy / pytest settings. Because BOTH packages
+# expose a top-level `scripts` package, a single unified `pytest` from the root would collide on
+# `import scripts`; tests are therefore run per package (see the Makefile / README). This root file
+# only pins shared ruff defaults and is intentionally NOT a buildable package.
 [tool.ruff]
 line-length = 100
 target-version = "py311"

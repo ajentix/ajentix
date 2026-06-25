@@ -27,9 +27,14 @@ pyproject.toml   # shared dev tooling (one-command test/lint across both package
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install pydantic pydantic-settings pytest ruff mypy   # quant needs pydantic; alpha is stdlib-only
-pytest                                                     # runs both packages' suites
-ruff check packages                                        # per-package ruff configs are respected
+make test        # runs both packages' suites (705 tests: 90 alpha + 615 quant)
+make lint        # ruff across both packages
+make check       # lint + typecheck + test
 ```
+
+Tests run **per package** (`make` cds into each): both packages expose a top-level `scripts`
+package, so a single root `pytest` would collide on `import scripts`. Each package keeps its own
+pyproject (build, pythonpath, mypy strictness).
 
 Per-package details live in `packages/<name>/README.md`.
 
