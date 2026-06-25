@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ajentix_alpha.yields.client import list_history, load_snapshot  # noqa: E402
 from ajentix_alpha.yields.monitor import MonitorReport, diff_snapshots  # noqa: E402
+from ajentix_alpha.yields.notify import alert_payload, try_post  # noqa: E402
 
 
 def _load_watch(path: Path) -> list[str]:
@@ -86,6 +88,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--include-new", action="store_true", help="Also surface brand-new high-APY pools."
     )
+    parser.add_argument(
+        "--webhook",
+        help="POST a JSON alert payload here (default: AJENTIX_WEBHOOK_URL env var).",
+    )
+    parser.add_argument(
+        "--notify-min",
+        choices=("critical", "warning", "info"),
+        default="critical",
+        help="Only POST when an alert at or above this severity is present (default: critical).",
+    )
     parser.add_argument("--reports-dir", default="reports")
     args = parser.parse_args(argv)
 
@@ -149,6 +161,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"wrote={reports / 'alerts.json'}")
     print(f"wrote={reports / 'alerts.md'}")
+
+    webhook = args.webhook or os.environ.get("AJENTIX_WEBHOOK_URL")
+    threshold = {"critical": report.critical, "warning": report.critical + report.warning,
+                 "info": report.critical + report.warning + report.info}[args.notify_min]
+    if webhook and threshold > 0:
+        ok, detail = try_post(
+            webhook,
+            alert_payload(
+                report, baseline=base_snap.fetched_at_utc, current=cur_snap.fetched_at_utc
+            ),
+        )
+        print(f"webhook={'ok' if ok else 'FAILED'} ({detail})")
     return 0
 
 

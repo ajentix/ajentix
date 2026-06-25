@@ -97,13 +97,46 @@ regardless of size (and its capital redeployed into survivors). Edit `data/holdi
 template), then run `rebalance.py [--alerts reports/alerts.json]` to emit
 `reports/rebalance_plan.{json,md}`.
 
+## Costs: gas-aware breakeven
+
+`yields/costs.py` holds conservative per-chain round-trip (enter + exit) cost estimates, because at
+$500-2000 gas is not a rounding error — a $50 position on Ethereum can take years to repay its gas.
+The allocation sheet shows a **breakeven-days** column per position, and the rebalancer applies a
+**gas-payback guard**: a BUY/INCREASE/REDUCE only fires if the moved capital's yield repays the
+round-trip cost inside the payback window — otherwise it stays HOLD. Cheap chains move freely; an
+Ethereum nibble at low APY does not.
+
+## Points farming: accrual + capital efficiency
+
+The airdrop EV model scores a campaign before you enter; `airdrops/points.py` tracks one you are
+already farming. Keep a dated log of point balances + deployed capital in
+`data/airdrops/points_log.json`; `scan_points.py` reports points/day, points per dollar-day, and —
+when you supply a modeled value-per-point — an implied APY-equivalent so a farm can be weighed
+against the safe yield it ties capital up against. Emits `reports/points_status.{json,md}`.
+
+## Notifications
+
+`monitor_yields.py --webhook URL` (or the `AJENTIX_WEBHOOK_URL` env var) POSTs a JSON alert payload
+to any webhook (Slack / Discord / Telegram-webhook / custom) when an alert at or above
+`--notify-min` (default critical) is present. Dependency-free stdlib POST; the URL is a secret — pass
+it at runtime, never commit it. Pair with a cron entry to get pinged only when a held position breaks.
+
+## One command: the dashboard
+
+`report.py` runs the whole pipeline in-process — scan -> size -> monitor -> calibrate -> airdrops ->
+points -> rebalance — and folds every result into a single `reports/dashboard.{json,md}`. Sections
+degrade gracefully (monitoring/calibration need two snapshots; airdrops/points/rebalance run only
+when their input file exists). `report.py --fetch --prices --protocols --budget 1000` is the
+everything-on run.
+
 ## Layout
 
 ```
-src/ajentix_alpha/yields/     # yields/price/protocol clients, ranking, sizing, monitoring,
-                              #   calibration, rebalancing
-src/ajentix_alpha/airdrops/   # airdrop / points EV model (user-supplied campaign inputs)
-scripts/                      # CLI generators (scan_yields, monitor_yields, validate_yields,
-                              #   scan_airdrops, rebalance)
+src/ajentix_alpha/yields/     # data clients + ranking, sizing, costs, monitoring,
+                              #   calibration, rebalancing, notifications
+src/ajentix_alpha/airdrops/   # airdrop EV model + points-farming tracker
+src/ajentix_alpha/dashboard.py  # folds every module's output into one summary
+scripts/                      # CLIs: scan_yields, scan_airdrops, scan_points,
+                              #   monitor_yields, validate_yields, rebalance, report
 tests/                        # deterministic unit tests (no network)
 ```

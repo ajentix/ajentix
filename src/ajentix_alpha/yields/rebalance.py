@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from . import costs
 from .model import ScoredPool
 from .sizing import DEFAULT_POLICY, SizingPolicy, build_plan
 
@@ -57,6 +58,8 @@ def build_rebalance(
     force_exit: Iterable[str] | None = None,
     min_trade_usd: float = MIN_REBALANCE_USD,
     policy: SizingPolicy = DEFAULT_POLICY,
+    payback_days: float = 120.0,
+    chain_costs: dict[str, float] | None = None,
 ) -> RebalancePlan:
     """Diff current holdings against a freshly-sized target into churn-aware rebalance actions."""
     held: dict[str, float] = {}
@@ -106,6 +109,12 @@ def build_rebalance(
             action, reason = "INCREASE", "raise toward target"
         else:
             action, reason = "REDUCE", "trim toward target"
+
+        # Cost-aware churn guard: skip a capital move whose yield can't repay round-trip gas.
+        if action in ("BUY", "INCREASE", "REDUCE"):
+            cost = costs.round_trip_cost(chain, chain_costs=chain_costs)
+            if not costs.worth_moving(delta, net_apy, cost, payback_days=payback_days):
+                action, reason = "HOLD", f"gas payback not met (~${cost:.0f} on {chain})"
 
         actions.append(
             RebalanceAction(

@@ -29,8 +29,11 @@ def _row(**kw: object) -> dict[str, object]:
     return base
 
 
-def _core(pool_id: str, apy: float) -> m.ScoredPool:
-    return m.score_pool(m.parse_pool(_row(pool=pool_id, apy=apy, apyBase=apy, apyMean30d=apy)))
+def _core(pool_id: str, apy: float, chain: str = "Base") -> m.ScoredPool:
+    # Default to a cheap chain so the gas-payback guard does not mask classification logic.
+    return m.score_pool(
+        m.parse_pool(_row(pool=pool_id, chain=chain, apy=apy, apyBase=apy, apyMean30d=apy))
+    )
 
 
 _RANKED = [_core("A", 12.0), _core("B", 10.0), _core("C", 8.0)]
@@ -115,3 +118,20 @@ def test_new_target_pool_is_bought() -> None:
     acts = _by_id(plan)
     assert acts["B"].action == "BUY"
     assert acts["C"].action == "BUY"
+
+
+def test_gas_payback_guard_blocks_costly_chain_moves() -> None:
+    # Same target, but on Ethereum a small move can't repay ~$30 round-trip gas -> HOLD.
+    eth = [_core("A", 12.0, chain="Ethereum"), _core("B", 10.0, chain="Ethereum")]
+    tgt = {p.pool_id: p.usd for p in build_plan(eth, 900.0).positions}
+    holdings = [
+        {"pool_id": "A", "usd": tgt["A"] - 120.0},  # > $50 floor, but yield can't repay $30 gas
+        {"pool_id": "B", "usd": tgt["B"] + 120.0},
+    ]
+    plan = rb.build_rebalance(holdings, eth, budget_usd=900.0)
+    acts = {a.pool_id: a for a in plan.actions}
+    assert acts["A"].action == "HOLD"
+    assert "gas payback" in acts["A"].reason
+    # A generous payback window lets the same move through.
+    loose = rb.build_rebalance(holdings, eth, budget_usd=900.0, payback_days=100_000.0)
+    assert {a.pool_id: a for a in loose.actions}["A"].action == "INCREASE"

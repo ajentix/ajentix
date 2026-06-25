@@ -16,6 +16,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from ajentix_alpha.yields import costs as cost  # noqa: E402
 from ajentix_alpha.yields import prices as px  # noqa: E402
 from ajentix_alpha.yields import protocols as pr  # noqa: E402
 from ajentix_alpha.yields.client import (  # noqa: E402
@@ -90,6 +91,12 @@ def _md(core: list[ScoredPool], sat: list[ScoredPool], fetched_at: str, sha: str
     return "\n".join(lines) + "\n"
 
 
+def _breakeven_days(usd: float, net_apy: float, chain: str) -> float | None:
+    """Round-trip-cost breakeven in days; None when the position earns nothing (avoids JSON inf)."""
+    be = cost.breakeven_days(usd, net_apy, cost.round_trip_cost(chain))
+    return None if be == float("inf") else round(be, 1)
+
+
 def _alloc_md(plan: AllocationPlan, fetched_at: str, sha: str) -> str:
     b = plan.budget_usd
     lines = [
@@ -109,18 +116,20 @@ def _alloc_md(plan: AllocationPlan, fetched_at: str, sha: str) -> str:
         "- Agent builds the plan; you sign every transaction. Not financial advice. "
         "DeFi = total-loss risk; modeled numbers, not guarantees.",
         "",
-        "| tier | $ | % budget | net APY% | chain | project | symbol | flags |",
-        "| --- | ---: | ---: | ---: | --- | --- | --- | --- |",
+        "| tier | $ | % budget | net APY% | breakeven d | chain | project | symbol | flags |",
+        "| --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
     ]
     for p in plan.positions:
+        be = _breakeven_days(p.usd, p.net_apy, p.chain)
+        be_str = f"{be:,.0f}" if be is not None else "inf"
         lines.append(
             f"| {p.tier} | {p.usd:,.2f} | {p.weight_of_budget * 100:.1f} | {p.net_apy:.2f} | "
-            f"{p.chain} | {p.project} | {p.symbol} | {', '.join(p.flags) or '-'} |"
+            f"{be_str} | {p.chain} | {p.project} | {p.symbol} | {', '.join(p.flags) or '-'} |"
         )
     if plan.cash_usd > 0.0:
         lines.append(
             f"| cash | {plan.cash_usd:,.2f} | {plan.cash_usd / b * 100 if b else 0:.1f} | 0.00 | "
-            "- | undeployed | - | uncapped capacity reached |"
+            "- | - | undeployed | - | uncapped capacity reached |"
         )
     return "\n".join(lines) + "\n"
 
@@ -241,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
                     "project": p.project,
                     "symbol": p.symbol,
                     "flags": list(p.flags),
+                    "est_roundtrip_cost_usd": round(cost.round_trip_cost(p.chain), 2),
+                    "breakeven_days": _breakeven_days(p.usd, p.net_apy, p.chain),
                     "pool_id": p.pool_id,
                 }
                 for p in plan.positions
