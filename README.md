@@ -131,6 +131,25 @@ degrade gracefully (monitoring/calibration need two snapshots; airdrops/points/r
 when their input file exists). `report.py --fetch --prices --protocols --budget 1000` is the
 everything-on run.
 
+## Running it systematically (cron / launchd)
+
+The decision loop — fetch free data, re-rank, re-size, diff your positions, and **push an alert when
+something degrades** — is pure deterministic code with no keys, so it runs itself on a schedule.
+`report.py --fetch --webhook URL` is the whole loop in one command: each run archives a fresh
+snapshot, regenerates the dashboard, and POSTs an alert (Slack/Discord/Telegram/custom) when a
+held/target position breaks at or above `--notify-min` (default critical). You only act when pinged.
+
+```bash
+# cron: every 6h, refresh + alert on critical degradation (URL is a secret — keep it in the env)
+0 */6 * * * AJENTIX_WEBHOOK_URL=… cd /path/to/ajentix-alpha && \
+  python3 scripts/report.py --fetch --prices --protocols --budget 1000 >> reports/cron.log 2>&1
+```
+
+On macOS, a launchd agent (`~/Library/LaunchAgents/…plist` with `StartInterval` 21600) does the same
+across reboots. What stays manual is **execution**: every deposit / withdraw / bridge / claim is a
+signed transaction. By design the agent never holds keys or signs — so the system tells you exactly
+what to do and when, but you (or a separately-built, explicitly-keyed executor) place the trades.
+
 ## Layout
 
 ```

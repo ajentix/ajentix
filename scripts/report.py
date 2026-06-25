@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from ajentix_alpha.yields.client import (  # noqa: E402
 )
 from ajentix_alpha.yields.model import rank_pools  # noqa: E402
 from ajentix_alpha.yields.monitor import diff_snapshots  # noqa: E402
+from ajentix_alpha.yields.notify import alert_payload, try_post  # noqa: E402
 from ajentix_alpha.yields.rebalance import build_rebalance, real_holdings  # noqa: E402
 from ajentix_alpha.yields.sizing import build_plan  # noqa: E402
 from ajentix_alpha.yields.validate import calibrate  # noqa: E402
@@ -133,6 +135,17 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
     parser.add_argument("--holdings", default="data/holdings.json")
     parser.add_argument("--reports-dir", default="reports")
     parser.add_argument("--top", type=int, default=5)
+    parser.add_argument(
+        "--webhook",
+        help="POST a JSON alert payload here when held/target positions degrade "
+        "(default: AJENTIX_WEBHOOK_URL env var). Makes one scheduled run a full autonomous loop.",
+    )
+    parser.add_argument(
+        "--notify-min",
+        choices=("critical", "warning", "info"),
+        default="critical",
+        help="Only POST when an alert at or above this severity is present (default: critical).",
+    )
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parents[1]
@@ -168,13 +181,17 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
     # Monitoring + calibration need two archived snapshots.
     alerts = None
     calibration = None
+    alert_window = ("", "")
     history = list_history(cache_dir)
     if len(history) >= 2:
-        prev_pools = list(load_snapshot(history[-2]).pools)
-        cur_pools = list(load_snapshot(history[-1]).pools)
+        prev_snap = load_snapshot(history[-2])
+        cur_snap = load_snapshot(history[-1])
+        prev_pools = list(prev_snap.pools)
+        cur_pools = list(cur_snap.pools)
         watch = [p.pool_id for p in plan.positions] if plan is not None else None
         alerts = diff_snapshots(prev_pools, cur_pools, watch=watch)
         calibration = calibrate(prev_pools, cur_pools)
+        alert_window = (prev_snap.fetched_at_utc, cur_snap.fetched_at_utc)
 
     # Best CORE net APY is the airdrop opportunity-cost baseline.
     core = [s for s in ranked if s.tier == "core"]
@@ -235,6 +252,21 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
     )
     print(f"wrote={reports / 'dashboard.json'}")
     print(f"wrote={reports / 'dashboard.md'}")
+
+    # One scheduled run becomes a full autonomous loop: alert on degradation via webhook.
+    webhook = args.webhook or os.environ.get("AJENTIX_WEBHOOK_URL")
+    if webhook and alerts is not None:
+        threshold = {
+            "critical": alerts.critical,
+            "warning": alerts.critical + alerts.warning,
+            "info": alerts.critical + alerts.warning + alerts.info,
+        }[args.notify_min]
+        if threshold > 0:
+            base, cur = alert_window
+            ok, detail = try_post(webhook, alert_payload(alerts, baseline=base, current=cur))
+            print(f"webhook={'ok' if ok else 'FAILED'} ({detail})")
+        else:
+            print(f"webhook=skipped (no alert >= {args.notify_min})")
     return 0
 
 
