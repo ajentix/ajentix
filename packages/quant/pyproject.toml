@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ajentix-quant"
+version = "0.0.1"
+description = "Deterministic, market-neutral quant money-making engine (delta-neutral funding/basis harvest). Runtime LLM=0; built and maintained by AI agents."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "UNLICENSED" }
+authors = [{ name = "ajentix" }]
+dependencies = [
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+# Live venue connectivity (ccxt). Not needed for offline backtest/tests.
+live = ["ccxt>=4.3"]
+# Data tooling for Phase 1 historical pipelines.
+data = ["pandas>=2.2", "polars>=1.0"]
+# Dev/test/lint.
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
+
+[project.scripts]
+aq-backtest = "ajentix_quant.scripts_entry:run_backtest_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ajentix_quant"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["ajentix_quant"]
+mypy_path = "src"
+ignore_missing_imports = true

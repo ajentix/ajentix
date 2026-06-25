@@ -1,0 +1,26 @@
+{
+  "generator_version": "ajentix-quant/phase1-g008-edge-demo",
+  "param_freeze_hash": null,
+  "row_counts": {
+    "funding.csv": 64,
+    "ohlcv.csv": 192
+  },
+  "scenario_id": "edge_demo_v1",
+  "schema_version": "aq-cache-v1",
+  "sha256_by_file": {
+    "funding.csv": "e2945348c44d26b015a9fe3dd8f6a8bd9cbb76e0864ab6f7ee17594f9ceacf87",
+    "ohlcv.csv": "fe22ab856cea4c8b3cbc80810399981755098bda5351069c9aeb4f3eace3991f"
+  },
+  "source_quality": {
+    "funding_history": "fixture",
+    "perp_mark_ohlcv": "fixture",
+    "perp_trade_ohlcv": "fixture",
+    "spot_trade_ohlcv": "fixture"
+  },
+  "symbols": [
+    "BTC/USDT:USDT"
+  ],
+  "timeframe": "8h",
+  "train_until_ms": 1704960000000,
+  "venue": "bybit"
+}

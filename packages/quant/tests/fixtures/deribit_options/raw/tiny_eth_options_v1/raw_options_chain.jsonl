@@ -1,0 +1,10 @@
+{"ask_amount":5.0,"ask_price":0.045,"bid_amount":4.0,"bid_price":0.041,"expiry_ms":1719532800000,"fixture":true,"instrument_name":"ETH-28JUN24-3000-P","snapshot_ts_ms":1717200000000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.089,"bid_amount":4.0,"bid_price":0.083,"expiry_ms":1719532800000,"fixture":true,"instrument_name":"ETH-28JUN24-3200-P","snapshot_ts_ms":1717200000000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.058,"bid_amount":4.0,"bid_price":0.052,"expiry_ms":1719532800000,"fixture":true,"instrument_name":"ETH-28JUN24-3600-C","snapshot_ts_ms":1717200000000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.081,"bid_amount":4.0,"bid_price":0.074,"expiry_ms":1721952000000,"fixture":true,"instrument_name":"ETH-26JUL24-3000-P","snapshot_ts_ms":1717200000000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.073,"bid_amount":4.0,"bid_price":0.066,"expiry_ms":1721952000000,"fixture":true,"instrument_name":"ETH-26JUL24-3800-C","snapshot_ts_ms":1717200000000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.044,"bid_amount":4.0,"bid_price":0.039,"expiry_ms":1719532800000,"fixture":true,"instrument_name":"ETH-28JUN24-3000-P","snapshot_ts_ms":1717203600000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.087,"bid_amount":4.0,"bid_price":0.081,"expiry_ms":1719532800000,"fixture":true,"instrument_name":"ETH-28JUN24-3200-P","snapshot_ts_ms":1717203600000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.06,"bid_amount":4.0,"bid_price":0.054,"expiry_ms":1719532800000,"fixture":true,"instrument_name":"ETH-28JUN24-3600-C","snapshot_ts_ms":1717203600000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.079,"bid_amount":4.0,"bid_price":0.072,"expiry_ms":1721952000000,"fixture":true,"instrument_name":"ETH-26JUL24-3000-P","snapshot_ts_ms":1717203600000,"source_quality":"fixture"}
+{"ask_amount":5.0,"ask_price":0.075,"bid_amount":4.0,"bid_price":0.068,"expiry_ms":1721952000000,"fixture":true,"instrument_name":"ETH-26JUL24-3800-C","snapshot_ts_ms":1717203600000,"source_quality":"fixture"}
