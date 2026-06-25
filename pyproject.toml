@@ -1,0 +1,13 @@
+# ajentix monorepo — shared dev-tooling config.
+#
+# Each package under packages/* keeps its own pyproject.toml for build/packaging and its own
+# (hierarchically-discovered) ruff/mypy settings. This root config drives one-command test/lint
+# across both packages from the repo root. It is intentionally NOT a buildable package itself.
+
+[tool.pytest.ini_options]
+pythonpath = ["packages/alpha/src", "packages/quant/src"]
+testpaths = ["packages/alpha/tests", "packages/quant/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

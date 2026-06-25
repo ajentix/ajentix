@@ -1,0 +1,35 @@
+# --- ajentix monorepo, repo-wide ignores ------------------------------------------------------
+# Large / regenerable data caches and generated reports — NEVER commit (see README "Large files").
+**/data/cache/
+**/data/realrun/
+**/data/realrun_full/
+**/data/full_chunks/
+**/reports/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# GJC workflow runtime state (planning artifacts kept local)
+.gjc/
+
+# Secrets — NEVER commit (object-storage creds, webhook URLs, keys)
+.env
+*.key
+*.pem
+secrets/
+
+# OS
+.DS_Store
