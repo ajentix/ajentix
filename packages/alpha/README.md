@@ -161,14 +161,31 @@ across reboots. What stays manual is **execution**: every deposit / withdraw / b
 signed transaction. By design the agent never holds keys or signs — so the system tells you exactly
 what to do and when, but you (or a separately-built, explicitly-keyed executor) place the trades.
 
+## Aggressive max-yield (degen) mode
+
+Everything above is capital-preservation-biased. `scan_aggressive.py` is the **opposite, high-risk
+lens**: it ranks the tradeable universe by **quoted APY** (the headline number you'd chase), sizes a
+small lottery of hard-capped bets, and — most importantly — **spells out exactly how each pick can
+go to zero** (impermanent loss, exit-liquidity/rug, unsustainable/decaying APY, reward-token dump,
+depeg, no audit, young chain). It prints both the **quoted APY and the conservative model's net**
+side by side, so the gap is unmissable: on live data the top picks quote ~100–300% while the model
+nets ~6–25%. The expected value is **not** the quoted APY; it is far lower, with a real chance each
+position goes to **zero**. Caps: ≤5 positions, ≤25% of budget per pool, $50 minimum. It refuses to
+*size* a pool the conservative model has zeroed (e.g. a broken peg) — that is an active loss, not a
+bet — though such pools still appear in the unsized "menu" so you see the bait, fully flagged. Run
+`scan_aggressive.py --prices --protocols --budget 1000` → `reports/aggressive_plan.{json,md}`.
+**Only size money you can afford to lose entirely. Not financial advice.**
+
 ## Layout
 
 ```
 src/ajentix_alpha/yields/     # data clients + ranking, sizing, costs, monitoring,
-                              #   calibration, rebalancing, notifications
+                              #   calibration, rebalancing, render, notifications,
+                              #   aggressive (max-yield/degen lens)
 src/ajentix_alpha/airdrops/   # airdrop EV model + points-farming tracker
 src/ajentix_alpha/dashboard.py  # folds every module's output into one summary
-scripts/                      # CLIs: scan_yields, scan_airdrops, scan_points,
-                              #   monitor_yields, validate_yields, rebalance, report
+scripts/                      # CLIs: scan_yields, scan_aggressive, scan_airdrops,
+                              #   scan_points, monitor_yields, validate_yields,
+                              #   rebalance, report
 tests/                        # deterministic unit tests (no network)
 ```
