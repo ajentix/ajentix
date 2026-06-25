@@ -1,0 +1,7 @@
+{
+  "note": "EXAMPLE / TEMPLATE. Replace with the pools you ACTUALLY hold and the USD in each. pool_id is the DefiLlama pool uuid (the 'pool_id' field in reports/yield_opportunities.json or allocation_plan.json). Unknown / stale pool_ids will surface as SELL (no longer ranked).",
+  "holdings": [
+    { "pool_id": "REPLACE-with-a-real-pool-uuid", "usd": 400.0 },
+    { "pool_id": "REPLACE-with-another-pool-uuid", "usd": 250.0 }
+  ]
+}

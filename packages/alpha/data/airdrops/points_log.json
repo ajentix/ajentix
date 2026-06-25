@@ -1,0 +1,10 @@
+{
+  "note": "EXAMPLE / TEMPLATE. A dated log of your point balances per campaign. Append a new entry each time you check. date is ISO YYYY-MM-DD; points is your current balance; capital_usd is the capital you had deployed in that period; value_per_point (optional) is YOUR modeled $ per point. Replace with real data.",
+  "entries": [
+    { "campaign": "example-l2-points-season", "date": "2026-05-01", "points": 0,      "capital_usd": 600.0, "value_per_point": 0.004 },
+    { "campaign": "example-l2-points-season", "date": "2026-05-15", "points": 21000,  "capital_usd": 600.0, "value_per_point": 0.004 },
+    { "campaign": "example-l2-points-season", "date": "2026-06-01", "points": 46000,  "capital_usd": 600.0, "value_per_point": 0.004 },
+    { "campaign": "example-lst-restaking",    "date": "2026-05-10", "points": 1200,   "capital_usd": 800.0 },
+    { "campaign": "example-lst-restaking",    "date": "2026-06-10", "points": 1240,   "capital_usd": 800.0 }
+  ]
+}
