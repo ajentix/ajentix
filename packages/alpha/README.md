@@ -39,11 +39,20 @@ impermanent-loss exposure, low TVL/liquidity, short history, reward-share (less 
 `scan_yields.py --fetch` to refresh the snapshot (each fetch is archived for monitoring) and write
 `reports/yield_opportunities.{json,md}`.
 
-Two optional risk layers harden the ranking when enabled (each from a free, unauthenticated feed,
-snapshotted and applied offline): `--prices` adds **depeg** detection (coins.llama.fi) — a stablecoin
-pool whose underlying drifts off $1 is haircut and barred from CORE; `--protocols` adds **protocol
-risk** (api.llama.fi) — unaudited or freshly-listed protocols are flagged and barred from CORE. With
-both, CORE means "deep, stable, *audited, established, on-peg*."
+CORE is hard-gated on **chain maturity** (always on, no feed needed): a pool on any chain outside a
+tight, battle-tested allow-list (Ethereum, Arbitrum, Optimism, Base, Polygon, BSC, Avalanche) is
+flagged `IMMATURE_CHAIN` and capped at SATELLITE regardless of TVL or audit — at low chain maturity
+the chain itself (sequencer / bridge / validator risk) is the dominant total-loss risk, invisible to
+a per-pool check.
+
+Two optional risk layers harden the ranking further when enabled (each from a free, unauthenticated
+feed, snapshotted and applied offline): `--prices` adds **depeg** detection (coins.llama.fi) — a
+stablecoin pool whose underlying drifts off $1 is haircut and barred from CORE, and one whose
+collateral is a yield-bearing / **synthetic dollar** (avUSD, USDe, USDu, …) rather than a recognized
+blue-chip stable (USDC / USDT / DAI / …) is flagged `EXOTIC_STABLE` and barred from CORE (a momentary
+$1 print is not the same risk as USDC); `--protocols` adds **protocol risk** (api.llama.fi) —
+unaudited or freshly-listed protocols are flagged and barred from CORE. With both, CORE means "deep,
+on a mature chain, in a recognized stable, *audited, established, on-peg*."
 
 ## Sizing: ranked sheet -> capped allocation plan
 

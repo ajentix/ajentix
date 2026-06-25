@@ -119,3 +119,46 @@ def test_no_injected_data_is_backward_compatible() -> None:
     assert plain.flags == ()
     assert plain.peg_deviation == 0.0
     assert plain.tier == "core"
+
+def _prices_sym(
+    symbol: str, price: float = 1.0, conf: float = 0.99
+) -> dict[str, dict[str, object]]:
+    return {_KEY: {"price": price, "confidence": conf, "symbol": symbol}}
+
+
+def test_recognized_stable_underlying_stays_core() -> None:
+    s = m.score_pool(m.parse_pool(_row()), prices=_prices_sym("USDC"))
+    assert "EXOTIC_STABLE" not in s.flags
+    assert s.tier == "core"
+
+
+def test_exotic_synthetic_dollar_blocked_from_core() -> None:
+    # $1 print but collateral is a synthetic dollar (USDe), not a recognized blue-chip stable.
+    s = m.score_pool(m.parse_pool(_row(symbol="SUSDE")), prices=_prices_sym("USDe"))
+    assert "EXOTIC_STABLE" in s.flags
+    assert s.tier == "satellite"
+    assert s.net_apy > 0.0  # a classification, not a loss: flag-only, no haircut
+
+
+def test_recognized_stable_alias_normalized_to_core() -> None:
+    # coins.llama.fi sometimes labels bridged USDC oddly (e.g. "AvalancheUSDC"); it is still USDC.
+    s = m.score_pool(m.parse_pool(_row()), prices=_prices_sym("AvalancheUSDC"))
+    assert "EXOTIC_STABLE" not in s.flags
+    assert s.tier == "core"
+
+
+def test_one_exotic_underlying_blocks_core() -> None:
+    addr2 = "0x" + "1" * 40
+    prices = {
+        _KEY: {"price": 1.0, "confidence": 0.99, "symbol": "USDC"},
+        coin_key(_CHAIN, addr2): {"price": 1.0, "confidence": 0.99, "symbol": "AUSD"},
+    }
+    s = m.score_pool(m.parse_pool(_row(underlyingTokens=[_ADDR, addr2])), prices=prices)
+    assert "EXOTIC_STABLE" in s.flags
+    assert s.tier == "satellite"
+
+
+def test_unverifiable_stable_not_flagged_exotic() -> None:
+    # low-confidence price cannot verify the symbol -> fail-open: no EXOTIC_STABLE, no false demote.
+    s = m.score_pool(m.parse_pool(_row()), prices=_prices_sym("USDe", conf=0.5))
+    assert "EXOTIC_STABLE" not in s.flags

@@ -35,6 +35,35 @@ PEG_MIN_CONFIDENCE = 0.9  # ignore prices below this oracle confidence (cannot v
 # --- optional protocol-risk constants; only used when a protocols snapshot is supplied ------------
 YOUNG_PROTOCOL_DAYS = 180  # listed under ~6 months ago -> YOUNG_PROTOCOL (less battle-tested)
 _SECONDS_PER_DAY = 86_400.0
+# --- chain-maturity gate (ALWAYS ON; no snapshot needed) ------------------------------------------
+# CORE (capital-preservation) is limited to chains with multi-year mainnet history, deep durable
+# stablecoin liquidity, and battle-tested bridge/consensus. Pools on any other chain are flagged
+# IMMATURE_CHAIN and capped at SATELLITE regardless of TVL/audit: at low chain maturity the chain
+# itself (sequencer / bridge / validator risk) is the dominant total-loss risk, invisible per-pool.
+# Intentionally tight; matched case-insensitively on the DefiLlama `chain` field.
+CORE_ELIGIBLE_CHAINS = frozenset(
+    {"ethereum", "arbitrum", "optimism", "base", "polygon", "bsc", "avalanche"}
+)
+# --- recognized-stablecoin gate; applied only when a price snapshot is supplied -------------------
+# A stablecoin CORE candidate must have EVERY verified underlying token resolve to one of these
+# blue-chip stables. A pool collateralized by a yield-bearing / synthetic dollar (avUSD, USDe, USDu,
+# iUSD, rUSD, frxUSD, GHO, ...) is flagged EXOTIC_STABLE and capped at SATELLITE: a momentary $1
+# print is not the same risk as USDC (issuer / collateral / depeg risk). Tight by design; matched
+# on the snapshot token symbol after _norm_stable_symbol normalization.
+RECOGNIZED_STABLES = frozenset(
+    {"usdc", "usdt", "dai", "usds", "pyusd", "gusd", "usdp", "tusd", "frax"}
+)
+_STABLE_CHAIN_PREFIXES = (
+    "avalanche",
+    "arbitrum",
+    "optimism",
+    "polygon",
+    "bridged",
+    "axelar",
+    "wormhole",
+    "wrapped",
+)
+_STABLE_SYMBOL_ALIASES = {"usdbc": "usdc"}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -122,20 +151,13 @@ def passes_universe(pool: Pool) -> bool:
     )
 
 
-def _peg_assessment(
-    pool: Pool, prices: dict[str, dict[str, Any]]
-) -> tuple[float, float, list[str]]:
-    """Worst peg deviation across a stablecoin pool's underlying tokens, as a net-APY haircut.
+def _verified_underlying(pool: Pool, prices: dict[str, dict[str, Any]]) -> list[tuple[str, float]]:
+    """(symbol, price) for each underlying token with a confident price in the snapshot.
 
-    Returns (peg_factor, peg_deviation, flags). Non-stablecoin pools, and prices that are missing or
-    below PEG_MIN_CONFIDENCE, are skipped (no adjustment -> no false alarm). peg_factor in [0,1]:
-    1.0 below the watch threshold, linear down to 0.0 at the break threshold (a broken peg is
-    principal loss, not a yield opportunity).
+    Tokens missing, zero-address, non-numeric, or below PEG_MIN_CONFIDENCE are skipped (cannot
+    verify -> no datum). Shared by the depeg check and the recognized-stable CORE gate.
     """
-    if not pool.stablecoin or not prices:
-        return 1.0, 0.0, []
-    worst = 0.0
-    verified = False
+    out: list[tuple[str, float]] = []
     for addr in pool.underlying_tokens:
         if not addr or addr.startswith("0x0000000000000000000000000000000000000000"):
             continue
@@ -148,10 +170,26 @@ def _peg_assessment(
             continue
         if isinstance(conf, (int, float)) and conf < PEG_MIN_CONFIDENCE:
             continue
-        verified = True
-        worst = max(worst, abs(float(price) - 1.0))
+        out.append((str(info.get("symbol", "")), float(price)))
+    return out
+
+
+def _peg_assessment(
+    pool: Pool, prices: dict[str, dict[str, Any]]
+) -> tuple[float, float, list[str]]:
+    """Worst peg deviation across a stablecoin pool's underlying tokens, as a net-APY haircut.
+
+    Returns (peg_factor, peg_deviation, flags). Non-stablecoin pools, and prices that are missing or
+    below PEG_MIN_CONFIDENCE, are skipped (no adjustment -> no false alarm). peg_factor in [0,1]:
+    1.0 below the watch threshold, linear down to 0.0 at the break threshold (a broken peg is
+    principal loss, not a yield opportunity).
+    """
+    if not pool.stablecoin or not prices:
+        return 1.0, 0.0, []
+    verified = _verified_underlying(pool, prices)
     if not verified:
         return 1.0, 0.0, []
+    worst = max(abs(price - 1.0) for _, price in verified)
     if worst >= PEG_BREAK_DEV:
         return 0.0, worst, ["DEPEG"]
     if worst >= PEG_WATCH_DEV:
@@ -182,6 +220,37 @@ def _protocol_risk(pool: Pool, protocols: dict[str, dict[str, Any]], now_ts: flo
     ):
         flags.append("YOUNG_PROTOCOL")
     return flags
+
+
+def _norm_stable_symbol(symbol: str) -> str:
+    """Normalize a symbol toward its base stable ticker (strip chain/bridge prefix, .e, alias)."""
+    s = symbol.strip().lower()
+    for prefix in _STABLE_CHAIN_PREFIXES:
+        if s.startswith(prefix) and len(s) > len(prefix):
+            s = s[len(prefix):]
+            break
+    s = s.removesuffix(".e")
+    return _STABLE_SYMBOL_ALIASES.get(s, s)
+
+
+def _exotic_stable_flags(pool: Pool, prices: dict[str, dict[str, Any]]) -> list[str]:
+    """EXOTIC_STABLE when a stablecoin pool's verified collateral is not a recognized blue-chip
+    stable (a yield-bearing / synthetic dollar). Needs the price snapshot for token symbols; with
+    no snapshot or unresolved symbols it stays silent (fail-open -> no false CORE demotion).
+    """
+    if not pool.stablecoin or not prices:
+        return []
+    symbols = [sym for sym, _ in _verified_underlying(pool, prices) if sym]
+    if not symbols:
+        return []
+    if any(_norm_stable_symbol(sym) not in RECOGNIZED_STABLES for sym in symbols):
+        return ["EXOTIC_STABLE"]
+    return []
+
+
+def _chain_flags(pool: Pool) -> list[str]:
+    """IMMATURE_CHAIN unless the pool sits on a battle-tested CORE-eligible chain (always on)."""
+    return [] if pool.chain.strip().lower() in CORE_ELIGIBLE_CHAINS else ["IMMATURE_CHAIN"]
 
 
 def score_pool(
@@ -219,10 +288,13 @@ def score_pool(
     if pool.tvl_usd < CORE_MIN_TVL_USD:
         flags.append("THIN_TVL")
 
+    flags.extend(_chain_flags(pool))  # always-on: immature chain -> never CORE
     # Optional price-risk (depeg) haircut.
     peg_factor, peg_dev, peg_flags = _peg_assessment(pool, prices or {})
     flags.extend(peg_flags)
     net_apy = max(0.0, net_apy * peg_factor)
+    # Recognized-stable gate (needs prices): synthetic / exotic dollar -> never CORE.
+    flags.extend(_exotic_stable_flags(pool, prices or {}))
     # Optional protocol-risk flags.
     if protocols is not None:
         flags.extend(_protocol_risk(pool, protocols, now_ts if now_ts is not None else time.time()))
@@ -238,6 +310,8 @@ def score_pool(
         and "DEPEG_WATCH" not in flags
         and "UNAUDITED" not in flags
         and "YOUNG_PROTOCOL" not in flags
+        and "IMMATURE_CHAIN" not in flags
+        and "EXOTIC_STABLE" not in flags
     )
     tier = "core" if is_core else "satellite"
     return ScoredPool(

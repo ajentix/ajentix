@@ -91,3 +91,22 @@ def test_rank_sorts_by_net_apy_desc() -> None:
 def test_net_apy_never_negative_and_zero_apy_excluded() -> None:
     ranked = m.rank_pools([_row(apy=0.0)])
     assert ranked == []
+
+
+def test_immature_chain_blocked_from_core() -> None:
+    # Deep, clean, on-peg stable -- but a brand-new chain is never capital-preservation CORE.
+    s = m.score_pool(m.parse_pool(_row(chain="Monad")))
+    assert "IMMATURE_CHAIN" in s.flags
+    assert s.tier == "satellite"
+
+
+def test_eligible_chain_has_no_immature_flag() -> None:
+    s = m.score_pool(m.parse_pool(_row(chain="Arbitrum")))
+    assert "IMMATURE_CHAIN" not in s.flags
+    assert s.tier == "core"
+
+
+def test_chain_eligibility_is_case_insensitive() -> None:
+    s = m.score_pool(m.parse_pool(_row(chain="ARBITRUM")))
+    assert "IMMATURE_CHAIN" not in s.flags
+    assert s.tier == "core"
