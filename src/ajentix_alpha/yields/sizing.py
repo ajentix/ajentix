@@ -10,8 +10,10 @@ Sizing logic, in order:
      Unused satellite budget flows DOWN into the (safer) core sleeve, never the reverse.
   2. Within each sleeve, weight candidate pools by their conservative net APY, then water-fill under
      a per-pool cap (excess on a capped pool is redistributed to the uncapped ones).
-  3. Drop any position below MIN_POSITION_USD (gas / min-deposit / ops floor) and redistribute, so a
-     tiny budget concentrates into a few real positions instead of unspendable dust.
+  3. Drop any position below MIN_POSITION_USD (gas / min-deposit / ops floor) OR whose round-trip
+     gas cannot be repaid within GAS_PAYBACK_DAYS at its size+chain+APY, and redistribute — so a
+     small budget concentrates into a few gas-efficient positions (e.g. an Ethereum core pool whose
+     capped size needs years to repay ~$30 gas is dropped in favour of cheap-chain pools).
   4. Cap the number of positions per sleeve (ops overhead is real at retail scale).
 Anything that cannot be deployed under these caps stays as cash.
 """
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import costs
 from .model import ScoredPool
 
 # --- frozen, documented sizing policy -------------------------------------------------------------
@@ -29,6 +32,7 @@ SATELLITE_MAX_PER_POOL_SHARE = 0.10  # a single satellite bet is capped tight (1
 MIN_POSITION_USD = 50.0  # below this a position is not worth gas / min-deposit -> dropped
 MAX_CORE_POSITIONS = 4  # ops/diversification balance for small capital
 MAX_SATELLITE_POSITIONS = 3
+GAS_PAYBACK_DAYS = 120.0  # round-trip gas must be repaid within this window, else position dropped
 _EPS = 1e-9
 
 
@@ -40,6 +44,7 @@ class SizingPolicy:
     min_position_usd: float = MIN_POSITION_USD
     max_core_positions: int = MAX_CORE_POSITIONS
     max_satellite_positions: int = MAX_SATELLITE_POSITIONS
+    gas_payback_days: float = GAS_PAYBACK_DAYS  # set to inf to disable the gas-payback filter
 
 
 DEFAULT_POLICY = SizingPolicy()
@@ -103,18 +108,40 @@ def _proportional_capped(pools: list[ScoredPool], budget: float, cap_usd: float)
     return alloc
 
 
+def _gas_ok(
+    pool: ScoredPool, usd: float, payback_days: float, chain_costs: dict[str, float] | None
+) -> bool:
+    """True iff a `usd` position in `pool` repays its round-trip gas within `payback_days`."""
+    cost = costs.round_trip_cost(pool.pool.chain, chain_costs=chain_costs)
+    return costs.worth_moving(usd, pool.net_apy, cost, payback_days=payback_days)
+
+
 def _allocate_sleeve(
-    pools: list[ScoredPool], budget: float, cap_usd: float, min_usd: float, max_positions: int
+    pools: list[ScoredPool],
+    budget: float,
+    cap_usd: float,
+    min_usd: float,
+    max_positions: int,
+    *,
+    payback_days: float = GAS_PAYBACK_DAYS,
+    chain_costs: dict[str, float] | None = None,
 ) -> list[tuple[ScoredPool, float]]:
-    """Allocate one sleeve, dropping sub-min positions and redistributing until all survive."""
+    """Allocate one sleeve, dropping positions that fall below the min size OR cannot repay their
+    round-trip gas within the payback window, redistributing until every survivor clears both."""
     active = pools[:max_positions]
     while active:
         alloc = _proportional_capped(active, budget, cap_usd)
-        below = [i for i, a in enumerate(alloc) if a < min_usd - _EPS]
-        if not below:
+        failing = [
+            i
+            for i, (s, a) in enumerate(zip(active, alloc, strict=True))
+            if a < min_usd - _EPS or not _gas_ok(s, a, payback_days, chain_costs)
+        ]
+        if not failing:
             return [(p, a) for p, a in zip(active, alloc, strict=True) if a > _EPS]
-        # Drop the weakest sub-min pool (lowest net APY == last, since input is sorted desc).
-        active = active[: max(below)] + active[max(below) + 1 :]
+        # Drop the lowest-net-APY failing pool (input is sorted desc, so the largest index),
+        # freeing its budget for higher-ranked pools that may then clear gas / the min size.
+        drop = max(failing)
+        active = active[:drop] + active[drop + 1 :]
     return []
 
 
@@ -132,6 +159,7 @@ def build_plan(
         budget * policy.satellite_max_per_pool_share,
         policy.min_position_usd,
         policy.max_satellite_positions,
+        payback_days=policy.gas_payback_days,
     )
     sat_used = sum(a for _, a in sat_alloc)
     # Unused satellite budget flows into the safer core sleeve (never the other way).
@@ -141,6 +169,7 @@ def build_plan(
         budget * policy.core_max_per_pool_share,
         policy.min_position_usd,
         policy.max_core_positions,
+        payback_days=policy.gas_payback_days,
     )
     core_used = sum(a for _, a in core_alloc)
 
@@ -177,5 +206,6 @@ def build_plan(
             "min_position_usd": policy.min_position_usd,
             "max_core_positions": float(policy.max_core_positions),
             "max_satellite_positions": float(policy.max_satellite_positions),
+            "gas_payback_days": float(policy.gas_payback_days),
         },
     )

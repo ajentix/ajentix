@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from . import costs
@@ -96,8 +96,12 @@ def build_rebalance(
     budget = float(budget_usd) if budget_usd is not None else sum(held.values())
 
     # Size the target over the universe MINUS forced/degraded names, so their capital redeploys.
+    # Disable sizing's gas-payback filter here: the rebalancer applies its own per-move gas guard
+    # below, so a held position on a costly chain is HELD rather than force-sold out of the target.
     investable = [s for s in ranked if s.pool.pool_id not in forced]
-    target_plan = build_plan(investable, budget, policy=policy)
+    target_plan = build_plan(
+        investable, budget, policy=replace(policy, gas_payback_days=float("inf"))
+    )
     target = {p.pool_id: p.usd for p in target_plan.positions}
 
     actions: list[RebalanceAction] = []

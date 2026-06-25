@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ajentix_alpha.yields import model as m
 from ajentix_alpha.yields import rebalance as rb
-from ajentix_alpha.yields.sizing import build_plan
+from ajentix_alpha.yields.sizing import SizingPolicy, build_plan
 
 
 def _row(**kw: object) -> dict[str, object]:
@@ -123,7 +123,10 @@ def test_new_target_pool_is_bought() -> None:
 def test_gas_payback_guard_blocks_costly_chain_moves() -> None:
     # Same target, but on Ethereum a small move can't repay ~$30 round-trip gas -> HOLD.
     eth = [_core("A", 12.0, chain="Ethereum"), _core("B", 10.0, chain="Ethereum")]
-    tgt = {p.pool_id: p.usd for p in build_plan(eth, 900.0).positions}
+    # Build the Ethereum baseline target with sizing's gas filter disabled (this test exercises the
+    # rebalancer's own per-move gas guard, not sizing's pool-level one).
+    no_gas = SizingPolicy(gas_payback_days=float("inf"))
+    tgt = {p.pool_id: p.usd for p in build_plan(eth, 900.0, policy=no_gas).positions}
     holdings = [
         {"pool_id": "A", "usd": tgt["A"] - 120.0},  # > $50 floor, but yield can't repay $30 gas
         {"pool_id": "B", "usd": tgt["B"] + 120.0},

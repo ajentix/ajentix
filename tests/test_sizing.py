@@ -7,7 +7,7 @@ from ajentix_alpha.yields import sizing as z
 def _row(**kw: object) -> dict[str, object]:
     base: dict[str, object] = {
         "pool": "p1",
-        "chain": "Ethereum",
+        "chain": "Base",
         "project": "demo",
         "symbol": "USDC",
         "tvlUsd": 50_000_000.0,
@@ -28,8 +28,11 @@ def _row(**kw: object) -> dict[str, object]:
     return base
 
 
-def _core(pool_id: str, apy: float) -> m.ScoredPool:
-    s = m.score_pool(m.parse_pool(_row(pool=pool_id, apy=apy, apyBase=apy, apyMean30d=apy)))
+def _core(pool_id: str, apy: float, *, chain: str = "Base") -> m.ScoredPool:
+    # Default to a cheap chain so the gas-payback filter does not mask capping/water-fill logic.
+    s = m.score_pool(
+        m.parse_pool(_row(pool=pool_id, apy=apy, apyBase=apy, apyMean30d=apy, chain=chain))
+    )
     assert s.tier == "core"
     return s
 
@@ -118,3 +121,25 @@ def test_max_positions_per_sleeve() -> None:
     ranked = [_core(f"c{i}", 10.0 - i * 0.1) for i in range(10)]
     plan = z.build_plan(ranked, 100_000.0)  # big budget so min-position never binds
     assert len([p for p in plan.positions if p.tier == "core"]) <= z.MAX_CORE_POSITIONS
+
+def test_gas_filter_drops_costly_chain_at_small_budget() -> None:
+    # At $1000 an Ethereum core position is capped below the size that repays ~$30 gas -> dropped
+    # in favour of the cheap-chain pool, even though Ethereum has the higher APY.
+    ranked = [_core("eth", 12.0, chain="Ethereum"), _core("base", 10.0, chain="Base")]
+    ids = {p.pool_id for p in z.build_plan(ranked, 1000.0).positions}
+    assert "eth" not in ids
+    assert "base" in ids
+
+
+def test_gas_filter_keeps_costly_chain_only_when_budget_repays_gas() -> None:
+    eth = [_core("eth", 12.0, chain="Ethereum")]
+    assert z.build_plan(eth, 1000.0).positions == ()  # capped size can't repay $30 in 120d
+    big = {p.pool_id for p in z.build_plan(eth, 3000.0).positions}
+    assert "eth" in big  # larger budget -> larger capped position -> gas repaid -> kept
+
+
+def test_gas_filter_disabled_with_infinite_payback() -> None:
+    policy = z.SizingPolicy(gas_payback_days=float("inf"))
+    ranked = [_core("eth", 12.0, chain="Ethereum")]
+    plan = z.build_plan(ranked, 1000.0, policy=policy)
+    assert "eth" in {p.pool_id for p in plan.positions}

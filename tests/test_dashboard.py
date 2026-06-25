@@ -11,7 +11,7 @@ _SNAP = {"fetched_at": "t", "sha": "abc", "pool_count": 10}
 def _row(**kw: object) -> dict[str, object]:
     base: dict[str, object] = {
         "pool": "p",
-        "chain": "Ethereum",
+        "chain": "Base",
         "project": "demo",
         "symbol": "USDC",
         "tvlUsd": 50_000_000.0,
