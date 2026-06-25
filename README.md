@@ -10,7 +10,7 @@ tell you the truth when there isn't any.
 
 [![CI](https://github.com/ajentix/ajentix/actions/workflows/ci.yml/badge.svg)](https://github.com/ajentix/ajentix/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 
 </div>
 
