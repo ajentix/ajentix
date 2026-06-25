@@ -23,6 +23,7 @@ from ajentix_alpha.airdrops.points import summarize as summarize_points  # noqa:
 from ajentix_alpha.dashboard import build_dashboard  # noqa: E402
 from ajentix_alpha.yields import prices as px  # noqa: E402
 from ajentix_alpha.yields import protocols as pr  # noqa: E402
+from ajentix_alpha.yields import render  # noqa: E402
 from ajentix_alpha.yields.client import (  # noqa: E402
     archive_snapshot,
     fetch_pools,
@@ -244,6 +245,46 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (reports / "dashboard.md").write_text(_md(summary), encoding="utf-8")
+
+    # Refresh the standalone sheets from the same ranked data, so a one-command run never leaves a
+    # stale opportunity/allocation file sitting behind the dashboard (one source of truth).
+    sat = [s for s in ranked if s.tier == "satellite"]
+    (reports / "yield_opportunities.json").write_text(
+        json.dumps(
+            render.opportunities_payload(
+                fetched_at=snap.fetched_at_utc,
+                sha=snap.sha256,
+                pool_count=snap.pool_count,
+                ranked=ranked,
+                core=core,
+                sat=sat,
+                top=args.top,
+            ),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (reports / "yield_opportunities.md").write_text(
+        render.opportunities_md(core, sat, snap.fetched_at_utc, snap.sha256, args.top),
+        encoding="utf-8",
+    )
+    if plan is not None:
+        (reports / "allocation_plan.json").write_text(
+            json.dumps(
+                render.allocation_payload(
+                    fetched_at=snap.fetched_at_utc, sha=snap.sha256, plan=plan
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (reports / "allocation_plan.md").write_text(
+            render.allocation_md(plan, snap.fetched_at_utc, snap.sha256), encoding="utf-8"
+        )
     print(
         f"ranked={summary['universe']['ranked']} "
         f"alloc={'y' if plan else 'n'} alerts={'y' if alerts else 'n'} "
@@ -252,6 +293,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
     )
     print(f"wrote={reports / 'dashboard.json'}")
     print(f"wrote={reports / 'dashboard.md'}")
+    print(f"wrote={reports / 'yield_opportunities.md'}")
+    if plan is not None:
+        print(f"wrote={reports / 'allocation_plan.md'}")
 
     # One scheduled run becomes a full autonomous loop: alert on degradation via webhook.
     webhook = args.webhook or os.environ.get("AJENTIX_WEBHOOK_URL")

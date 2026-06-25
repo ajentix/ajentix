@@ -137,8 +137,10 @@ it at runtime, never commit it. Pair with a cron entry to get pinged only when a
 `report.py` runs the whole pipeline in-process — scan -> size -> monitor -> calibrate -> airdrops ->
 points -> rebalance — and folds every result into a single `reports/dashboard.{json,md}`. Sections
 degrade gracefully (monitoring/calibration need two snapshots; airdrops/points/rebalance run only
-when their input file exists). `report.py --fetch --prices --protocols --budget 1000` is the
-everything-on run.
+when their input file exists). It also refreshes the standalone `reports/yield_opportunities.{json,md}`
+and `reports/allocation_plan.{json,md}` from the same ranked snapshot, so a one-command run never
+leaves a stale sheet sitting behind the dashboard. `report.py --fetch --prices --protocols --budget
+1000` is the everything-on run.
 
 ## Running it systematically (cron / launchd)
 
