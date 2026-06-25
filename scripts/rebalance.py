@@ -4,7 +4,10 @@
 Loads the cached yields snapshot, ranks it, sizes a target for your budget, and diffs it against
 `data/holdings.json` (what you actually hold) -> BUY / SELL / INCREASE / REDUCE / HOLD actions, with
 a minimum-trade floor so a small account is not churned to death on gas. Point `--alerts` at an
-alerts.json to force-exit any pool with a critical monitor alert. The agent plans; you sign.
+alerts.json to force-exit any pool with a critical monitor alert. Pass `--prices` / `--protocols`
+to apply the same depeg / protocol-risk layers as the scanner (from their cached snapshots) so the
+standalone plan ranks against the identical filtered universe as the dashboard. The agent plans;
+you sign.
 """
 
 from __future__ import annotations
@@ -17,12 +20,15 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from ajentix_alpha.yields import prices as px  # noqa: E402
+from ajentix_alpha.yields import protocols as pr  # noqa: E402
 from ajentix_alpha.yields.client import load_snapshot  # noqa: E402
 from ajentix_alpha.yields.model import rank_pools  # noqa: E402
 from ajentix_alpha.yields.rebalance import (  # noqa: E402
     MIN_REBALANCE_USD,
     RebalancePlan,
     build_rebalance,
+    real_holdings,
 )
 
 
@@ -31,7 +37,7 @@ def _load_holdings(path: Path) -> list[dict[str, Any]]:
     rows = data.get("holdings") if isinstance(data, dict) else data
     if not isinstance(rows, list):
         raise ValueError(f"{path}: expected a list of holdings or {{'holdings': [...]}}")
-    return [r for r in rows if isinstance(r, dict) and "pool_id" in r]
+    return real_holdings(rows)
 
 
 def _load_forced_exits(path: Path) -> set[str]:
@@ -79,12 +85,35 @@ def main(argv: list[str] | None = None) -> int:
         help="Total USD to size the target to. Default: sum of current holdings.",
     )
     parser.add_argument("--reports-dir", default="reports")
+    parser.add_argument(
+        "--prices",
+        action="store_true",
+        help="Apply depeg risk from the cached free token-price snapshot (coins.llama).",
+    )
+    parser.add_argument(
+        "--protocols",
+        action="store_true",
+        help="Apply protocol risk (audits/age) from the cached DefiLlama protocols snapshot.",
+    )
+    parser.add_argument("--prices-dir", default="data/cache/prices")
+    parser.add_argument("--protocols-dir", default="data/cache/protocols")
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
     holdings = _load_holdings(repo_root / args.holdings)
     holdings_total = sum(max(0.0, float(h.get("usd", 0.0))) for h in holdings)
-    ranked = rank_pools(list(load_snapshot(repo_root / args.cache_dir).pools))
+    price_map = px.load_snapshot(repo_root / args.prices_dir).prices if args.prices else None
+    proto_index = None
+    proto_now = None
+    if args.protocols:
+        psnap = pr.load_snapshot(repo_root / args.protocols_dir)
+        proto_index, proto_now = psnap.by_slug, psnap.fetched_at_epoch
+    ranked = rank_pools(
+        list(load_snapshot(repo_root / args.cache_dir).pools),
+        prices=price_map,
+        protocols=proto_index,
+        now_ts=proto_now,
+    )
     forced = _load_forced_exits(repo_root / args.alerts) if args.alerts else set()
 
     plan = build_rebalance(holdings, ranked, budget_usd=args.budget, force_exit=forced)

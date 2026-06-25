@@ -14,6 +14,7 @@ their capital is redeployed into what survives. Pure and deterministic. The agen
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +27,26 @@ MIN_REBALANCE_USD = 50.0  # ignore adjustments smaller than this (gas / churn fl
 _EPS = 1e-9
 
 _ACTION_ORDER = {"SELL": 0, "BUY": 1, "INCREASE": 2, "REDUCE": 3, "HOLD": 4}
+
+def is_pool_id(value: object) -> bool:
+    """True iff value is a real DefiLlama pool id (a canonical UUID).
+
+    DefiLlama pool ids are UUIDs (e.g. ``d85a7f5f-3624-4b6b-b3a7-eefb42b2a5e9``). The shipped
+    ``data/holdings.json`` template uses non-UUID placeholders (``REPLACE-with-a-real-pool-uuid``);
+    this lets callers drop an unedited template instead of treating placeholders as real positions.
+    """
+    if not isinstance(value, str):
+        return False
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def real_holdings(rows: Iterable[Any]) -> list[dict[str, Any]]:
+    """Keep only holding rows whose pool_id is a real UUID; drop template placeholders / junk."""
+    return [r for r in rows if isinstance(r, dict) and is_pool_id(r.get("pool_id"))]
 
 
 @dataclass(frozen=True, kw_only=True)

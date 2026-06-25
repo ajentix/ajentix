@@ -135,3 +135,34 @@ def test_gas_payback_guard_blocks_costly_chain_moves() -> None:
     # A generous payback window lets the same move through.
     loose = rb.build_rebalance(holdings, eth, budget_usd=900.0, payback_days=100_000.0)
     assert {a.pool_id: a for a in loose.actions}["A"].action == "INCREASE"
+
+_REAL_UUID = "d85a7f5f-3624-4b6b-b3a7-eefb42b2a5e9"
+
+
+def test_is_pool_id_accepts_real_uuid_rejects_placeholders() -> None:
+    assert rb.is_pool_id(_REAL_UUID)
+    assert not rb.is_pool_id("REPLACE-with-a-real-pool-uuid")  # shipped template placeholder
+    assert not rb.is_pool_id("")
+    assert not rb.is_pool_id(None)
+    assert not rb.is_pool_id(123)
+
+
+def test_real_holdings_drops_template_and_junk() -> None:
+    rows = [
+        {"pool_id": _REAL_UUID, "usd": 400.0},
+        {"pool_id": "REPLACE-with-a-real-pool-uuid", "usd": 400.0},  # unedited template
+        {"usd": 100.0},  # no pool_id
+        "not-a-dict",
+    ]
+    kept = rb.real_holdings(rows)
+    assert [h["pool_id"] for h in kept] == [_REAL_UUID]
+
+
+def test_unedited_template_yields_no_trades() -> None:
+    # The whole point: an untouched template must not surface phantom SELLs.
+    template = [
+        {"pool_id": "REPLACE-with-a-real-pool-uuid", "usd": 400.0},
+        {"pool_id": "REPLACE-with-another-pool-uuid", "usd": 250.0},
+    ]
+    plan = rb.build_rebalance(rb.real_holdings(template), _RANKED, budget_usd=_BUDGET)
+    assert all(a.action != "SELL" for a in plan.actions)

@@ -95,7 +95,9 @@ HOLD so a small account isn't churned to death on gas, while risk exits always f
 has dropped out of the ranked universe (degraded / gone) or carries a critical monitor alert is SOLD
 regardless of size (and its capital redeployed into survivors). Edit `data/holdings.json` (a
 template), then run `rebalance.py [--alerts reports/alerts.json]` to emit
-`reports/rebalance_plan.{json,md}`.
+`reports/rebalance_plan.{json,md}`. Pass `--prices`/`--protocols` to rank the target against the same
+depeg/protocol-risk-filtered universe the scanner and dashboard use (otherwise the standalone plan can
+surface a pool the dashboard would bar from CORE).
 
 ## Costs: gas-aware breakeven
 

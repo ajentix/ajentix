@@ -31,7 +31,7 @@ from ajentix_alpha.yields.client import (  # noqa: E402
 )
 from ajentix_alpha.yields.model import rank_pools  # noqa: E402
 from ajentix_alpha.yields.monitor import diff_snapshots  # noqa: E402
-from ajentix_alpha.yields.rebalance import build_rebalance  # noqa: E402
+from ajentix_alpha.yields.rebalance import build_rebalance, real_holdings  # noqa: E402
 from ajentix_alpha.yields.sizing import build_plan  # noqa: E402
 from ajentix_alpha.yields.validate import calibrate  # noqa: E402
 
@@ -202,9 +202,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
     if holdings_path.is_file():
         data = _read_json(holdings_path)
         rows = data.get("holdings") if isinstance(data, dict) else data
-        raw = rows if isinstance(rows, list) else []
-        held = [r for r in raw if isinstance(r, dict) and "pool_id" in r]
-        if held and any(str(h.get("pool_id", "")).count("-") >= 4 for h in held):
+        held = real_holdings(rows if isinstance(rows, list) else [])
+        if held:
             rebalance = build_rebalance(held, ranked)
 
     summary = build_dashboard(
