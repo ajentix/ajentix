@@ -12,6 +12,8 @@ tell you the truth when there isn't any.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 
+**▸ [Live yield dashboard](https://ajentix.github.io/ajentix/)** — auto-updated every ~6h from free data, no keys, no backend.
+
 </div>
 
 ## Highlights

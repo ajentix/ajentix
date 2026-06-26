@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ajentix_alpha.airdrops.model import rank_campaigns  # noqa: E402
 from ajentix_alpha.airdrops.points import summarize as summarize_points  # noqa: E402
 from ajentix_alpha.dashboard import build_dashboard  # noqa: E402
+from ajentix_alpha.dashboard_html import render_html  # noqa: E402
 from ajentix_alpha.yields import prices as px  # noqa: E402
 from ajentix_alpha.yields import protocols as pr  # noqa: E402
 from ajentix_alpha.yields import render  # noqa: E402
@@ -245,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (reports / "dashboard.md").write_text(_md(summary), encoding="utf-8")
+    (reports / "dashboard.html").write_text(render_html(summary), encoding="utf-8")
 
     # Refresh the standalone sheets from the same ranked data, so a one-command run never leaves a
     # stale opportunity/allocation file sitting behind the dashboard (one source of truth).
@@ -293,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 - linear orches
     )
     print(f"wrote={reports / 'dashboard.json'}")
     print(f"wrote={reports / 'dashboard.md'}")
+    print(f"wrote={reports / 'dashboard.html'}")
     print(f"wrote={reports / 'yield_opportunities.md'}")
     if plan is not None:
         print(f"wrote={reports / 'allocation_plan.md'}")

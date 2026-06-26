@@ -1,0 +1,47 @@
+name: Live dashboard
+
+# Builds the static yield dashboard from live free data and publishes it to GitHub Pages.
+# No keys, no deps (alpha is stdlib-only) — just fetch, rank, render, deploy.
+
+on:
+  schedule:
+    - cron: "17 */6 * * *" # every ~6h, off-minute to dodge scheduler congestion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build dashboard from live free data
+        working-directory: packages/alpha
+        run: python3 scripts/report.py --fetch --prices --protocols --budget 1000
+
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp packages/alpha/reports/dashboard.html site/index.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
