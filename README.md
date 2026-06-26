@@ -16,7 +16,11 @@ tell you the truth when there isn't any.
 
 <br>
 
-[<img src="docs/dashboard.png" alt="ajentix live DeFi yield dashboard" width="820">](https://ajentix.github.io/ajentix/)
+[<img src="docs/demo.gif" alt="ajentix scanner — free data in, risk-adjusted yield sheet out" width="820">](https://ajentix.github.io/ajentix/)
+
+<br>
+
+[<img src="docs/dashboard.png" alt="ajentix live web dashboard" width="820">](https://ajentix.github.io/ajentix/)
 
 </div>
 
@@ -32,7 +36,7 @@ tell you the truth when there isn't any.
   Read-only research: **you sign every transaction.**
 - 🎲 **Aggressive mode, eyes open** — an optional max-yield "degen" lens that ranks by *quoted* APY
   and spells out exactly how each pick can go to zero (IL, rug, decay, reward-dump, depeg).
-- ✅ **727 tests**, `ruff` + `mypy --strict`, **zero runtime deps** in `alpha` (stdlib-only by
+- ✅ **731 tests**, `ruff` + `mypy --strict`, **zero runtime deps** in `alpha` (stdlib-only by
   design; `quant` adds only `pydantic`).
 
 ## Why this exists
@@ -69,7 +73,7 @@ quoted APR.
 python3 -m venv .venv && source .venv/bin/activate
 pip install pydantic pydantic-settings pytest ruff mypy   # quant needs pydantic; alpha is stdlib-only
 
-make check        # ruff + mypy (strict) + pytest across both packages (727 tests)
+make check        # ruff + mypy (strict) + pytest across both packages (731 tests)
 
 # alpha: a live, risk-adjusted DeFi yield sheet + capped $1,000 allocation plan (read-only)
 python3 packages/alpha/scripts/report.py --fetch --prices --protocols --budget 1000
