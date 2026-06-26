@@ -25,6 +25,22 @@ venv/
 # GJC workflow runtime state (planning artifacts kept local)
 .gjc/
 
+# AI coding agents & editor state — local only, NEVER commit (leak local paths, chat history,
+# or MCP/API keys). Force-add a specific file only if you deliberately want to share it.
+.claude/
+.codex/
+.cursor/
+.aider*
+.specstory/
+.continue/
+.windsurf/
+.cody/
+.tabnine/
+.mcp.json
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
 # Secrets — NEVER commit (object-storage creds, webhook URLs, keys)
 .env
 *.key
