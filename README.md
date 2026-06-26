@@ -14,6 +14,10 @@ tell you the truth when there isn't any.
 
 **▸ [Live yield dashboard](https://ajentix.github.io/ajentix/)** — auto-updated every ~6h from free data, no keys, no backend.
 
+<br>
+
+[<img src="docs/dashboard.png" alt="ajentix live DeFi yield dashboard" width="820">](https://ajentix.github.io/ajentix/)
+
 </div>
 
 ## Highlights
